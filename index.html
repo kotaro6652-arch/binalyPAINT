@@ -20,14 +20,12 @@
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
   font-family:'Noto Sans JP',sans-serif;touch-action:none}
 #app{position:relative;width:100vw;height:100vh;overflow:hidden}
-
-/* ── Canvas ── */
 #ca{position:absolute;inset:0;overflow:hidden;touch-action:none}
 #cw{position:absolute;transform-origin:0 0;will-change:transform}
 #paper{position:relative;box-shadow:0 2px 32px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.3)}
 .lc{position:absolute;top:0;left:0;image-rendering:pixelated;image-rendering:crisp-edges}
 
-/* ── Top buttons ── */
+/* ── Top ── */
 .topbtn{position:fixed;top:10px;z-index:220;background:var(--sf);border:1px solid var(--bd2);
   border-radius:20px;padding:6px 12px;font-size:12px;color:var(--tx2);cursor:pointer;
   display:flex;align-items:center;gap:5px;touch-action:manipulation;white-space:nowrap}
@@ -43,7 +41,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 #open-btn{right:calc(10px + 84px + 8px)}
 #sv-btn{right:10px}
 
-/* ── Top panels ── */
 .toppanel{position:fixed;top:44px;z-index:219;background:var(--sf);border:1px solid var(--bd2);
   border-radius:12px;padding:10px;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5)}
 .toppanel.open{display:block}
@@ -64,7 +61,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
   border-radius:8px;color:var(--acc);font-size:13px;font-family:'Noto Sans JP',sans-serif;
   cursor:pointer;touch-action:manipulation}
 
-/* ── Right tabs ── */
+/* ── Right tabs / panels ── */
 #rtabs{position:fixed;right:0;top:50%;transform:translateY(-50%);
   display:flex;flex-direction:column;gap:4px;z-index:210;
   transition:right .25s cubic-bezier(.4,0,.2,1)}
@@ -76,8 +73,6 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 #tab-er{background:#c6c6c6;color:#2a2a2a}
 #tab-ly{background:#787878;color:rgba(255,255,255,.88)}
 .rtab.act{outline:2px solid rgba(255,255,255,.32);outline-offset:-2px}
-
-/* ── Right panels ── */
 .rpanel{position:fixed;right:calc(-1 * var(--pw));top:50%;transform:translateY(-50%);
   width:var(--pw);max-height:88vh;background:var(--sf);border:1px solid var(--bd2);
   border-right:none;border-radius:14px 0 0 14px;z-index:205;
@@ -94,54 +89,36 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 /* ── Form ── */
 .row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .row label{font-size:11px;color:var(--tx2);min-width:64px;flex-shrink:0}
-.row .val{font-size:11px;color:var(--tx);font-family:'DM Mono',monospace;
-  min-width:36px;text-align:right;flex-shrink:0}
-.slabel{font-size:10px;color:var(--tx2);letter-spacing:.08em;text-transform:uppercase;
-  margin:10px 0 6px;padding-left:2px}
-
-/* Custom inertia slider */
+.row .val{font-size:11px;color:var(--tx);font-family:'DM Mono',monospace;min-width:36px;text-align:right;flex-shrink:0}
+.slabel{font-size:10px;color:var(--tx2);letter-spacing:.08em;text-transform:uppercase;margin:10px 0 6px;padding-left:2px}
 .csl{flex:1;height:28px;position:relative;touch-action:none;cursor:ew-resize}
 .csl-bg{position:absolute;left:0;right:0;top:50%;height:3px;margin-top:-1.5px;
   background:rgba(255,255,255,.15);border-radius:2px;pointer-events:none}
 .csl-fill{position:absolute;left:0;top:0;bottom:0;background:var(--acc);border-radius:2px;pointer-events:none}
 .csl-knob{position:absolute;top:50%;width:20px;height:20px;margin-top:-10px;margin-left:-10px;
   background:var(--acc);border-radius:50%;box-shadow:0 0 0 3px rgba(91,156,246,.2);pointer-events:none}
-
-/* Native range (curve only) */
-input[type=range].native{flex:1;-webkit-appearance:none;appearance:none;height:3px;
-  border-radius:2px;outline:none;touch-action:none;
+input[type=range].native{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;
+  outline:none;touch-action:none;
   background:linear-gradient(to right,var(--acc) 0%,var(--acc) var(--pct,50%),rgba(255,255,255,.15) var(--pct,50%))}
 input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;
   border-radius:50%;background:var(--acc);cursor:pointer;touch-action:none;
   box-shadow:0 0 0 3px rgba(91,156,246,.2)}
-
 .togrow{display:flex;align-items:center;justify-content:space-between;
   margin-bottom:10px;padding:8px 10px;background:var(--sf2);border-radius:8px;border:1px solid var(--bd)}
 .togrow .lbl{font-size:12px;color:var(--tx)}
 .tog{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0}
 .tog input{opacity:0;width:0;height:0}
-.ttr{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:20px;
-  transition:background .2s;pointer-events:none}
+.ttr{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:20px;transition:background .2s;pointer-events:none}
 .tog input:checked+.ttr{background:var(--acc)}
-.tth{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;
-  transition:transform .2s;pointer-events:none}
+.tth{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform .2s;pointer-events:none}
 .tog input:checked~.tth{transform:translateX(16px)}
-
-#curve-cv{width:100%;height:72px;border-radius:8px;border:1px solid var(--bd);
-  background:rgba(0,0,0,.4);display:block;margin-bottom:10px}
-
-/* stab preview */
-#stab-cv{width:100%;height:36px;border-radius:6px;border:1px solid var(--bd);
-  background:rgba(0,0,0,.3);display:block;margin-bottom:4px}
-
-/* eraser mode */
+#curve-cv{width:100%;height:72px;border-radius:8px;border:1px solid var(--bd);background:rgba(0,0,0,.4);display:block;margin-bottom:10px}
+#stab-cv{width:100%;height:36px;border-radius:6px;border:1px solid var(--bd);background:rgba(0,0,0,.3);display:block;margin-bottom:4px}
 .mode-sel{display:flex;gap:6px;margin-bottom:12px}
-.mode-btn{flex:1;padding:8px 4px;text-align:center;font-size:11px;
-  font-family:'Noto Sans JP',sans-serif;background:var(--sf2);
-  border:1px solid var(--bd);border-radius:8px;color:var(--tx2);
+.mode-btn{flex:1;padding:8px 4px;text-align:center;font-size:11px;font-family:'Noto Sans JP',sans-serif;
+  background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx2);
   cursor:pointer;touch-action:manipulation;transition:background .12s,border-color .12s,color .12s}
 .mode-btn.sel{background:rgba(248,113,113,.18);border-color:rgba(248,113,113,.5);color:var(--red)}
-
 #lock-row{display:flex;align-items:center;justify-content:space-between;
   margin-bottom:10px;padding:9px 12px;background:var(--sf2);border-radius:8px;border:1px solid var(--bd)}
 #lock-row .lbl{font-size:12px;color:var(--tx)}
@@ -163,10 +140,8 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20p
 .loprow span{font-size:9px;color:var(--tx2);min-width:24px;text-align:right;font-family:'DM Mono',monospace}
 .lcd{width:18px;height:18px;border-radius:50%;border:2px solid var(--bd2);
   flex-shrink:0;cursor:pointer;position:relative;overflow:hidden}
-.lcd input[type=color]{position:absolute;inset:-4px;width:calc(100% + 8px);
-  height:calc(100% + 8px);opacity:0;cursor:pointer}
-.lvis,.ldel{width:22px;height:22px;background:none;border:none;font-size:12px;
-  cursor:pointer;color:var(--tx2);flex-shrink:0;touch-action:manipulation}
+.lcd input[type=color]{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);opacity:0;cursor:pointer}
+.lvis,.ldel{width:22px;height:22px;background:none;border:none;font-size:12px;cursor:pointer;color:var(--tx2);flex-shrink:0;touch-action:manipulation}
 
 /* ── Eraser button ── */
 #erb{position:fixed;left:5px;width:76px;height:76px;border-radius:50%;
@@ -184,16 +159,13 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20p
   background:rgba(248,113,113,.88);color:#fff;padding:4px 16px;border-radius:14px;
   font-size:11px;pointer-events:none;z-index:300;display:none;backdrop-filter:blur(4px)}
 #badge.show{display:block}
-
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(14px);
   background:rgba(0,0,0,.74);color:#fff;padding:6px 18px;border-radius:18px;
   font-size:12px;pointer-events:none;z-index:999;opacity:0;
   transition:opacity .18s,transform .18s;white-space:nowrap;backdrop-filter:blur(8px)}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-
 #prc{position:fixed;pointer-events:none;z-index:500;transform:translate(-50%,-50%);
   border-radius:50%;border:1.5px solid rgba(255,255,255,.72);mix-blend-mode:difference;display:none}
-
 #zl{position:fixed;bottom:14px;right:14px;font-size:11px;font-family:'DM Mono',monospace;
   color:var(--tx2);pointer-events:none;z-index:100}
 </style>
@@ -231,21 +203,18 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20p
     <div class="rtab" id="tab-ly">◫</div>
   </div>
 
-  <!-- Brush panel -->
   <div class="rpanel" id="br-panel">
     <div class="ph">ブラシ</div>
     <div class="pb">
       <div class="slabel">サイズ（直径 px）</div>
-      <div class="row"><label>最大</label><div class="csl" id="csl-sz"  data-min="1" data-max="200" data-ratio="5"></div><span class="val" id="v-sz">12px</span></div>
+      <div class="row"><label>最大</label><div class="csl" id="csl-sz" data-min="1" data-max="200" data-ratio="5"></div><span class="val" id="v-sz">12px</span></div>
       <div class="row"><label>最小</label><div class="csl" id="csl-msz" data-min="1" data-max="100" data-ratio="5"></div><span class="val" id="v-msz">1px</span></div>
-
       <div class="slabel">手振れ補正</div>
       <canvas id="stab-cv" width="244" height="36"></canvas>
       <div class="row"><label>強さ</label><div class="csl" id="csl-stab" data-min="1" data-max="20" data-ratio="3"></div><span class="val" id="v-stab">1</span></div>
       <div style="font-size:10px;color:var(--tx2);margin-bottom:8px;line-height:1.6;padding:6px 8px;background:var(--sf2);border-radius:6px;border:1px solid var(--bd)">
-        1=オフ。上げるほど滑らかになりますが追従が遅れます。<br>短いストロークは少し遅延します（5以下推奨）。
+        1=オフ。短いストロークは5以下推奨。
       </div>
-
       <div class="slabel">筆圧</div>
       <div class="togrow"><span class="lbl">筆圧感知</span>
         <label class="tog"><input type="checkbox" id="cb-pr" checked>
@@ -264,7 +233,6 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20p
     </div>
   </div>
 
-  <!-- Eraser panel -->
   <div class="rpanel" id="er-panel">
     <div class="ph">消しゴム設定</div>
     <div class="pb">
@@ -277,12 +245,11 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:20p
       <div class="slabel">消しゴムサイズ（直径 px）</div>
       <div class="row"><label>サイズ</label><div class="csl" id="csl-esz" data-min="1" data-max="300" data-ratio="5"></div><span class="val" id="v-esz">20px</span></div>
       <div style="font-size:11px;color:var(--tx2);line-height:1.85;background:var(--sf2);border-radius:8px;padding:10px;border:1px solid var(--bd);margin-top:4px">
-        🔓 アンロック後に左側のボタンをドラッグで位置変更可能。
+        🔓 アンロック後にドラッグで位置変更可能。
       </div>
     </div>
   </div>
 
-  <!-- Layer panel -->
   <div class="rpanel" id="ly-panel">
     <div class="ph">レイヤー <button id="btn-addlayer">＋</button></div>
     <div class="pb"><div id="llist"></div></div>
@@ -304,52 +271,51 @@ let CW=2360, CH=1640;
 const MAX_UNDO=20;
 
 // ═══════════════════════════════════════════════
-//  BRUSH / STAB STATE
-// ═══════════════════════════════════════════════
-let bSize=12, bMin=1, bPressure=true, bCurve=2.0, bThresh=0.03, eSize=20;
-let stabLen=1;    // 1 = no smoothing; rolling average window size
-let bgColor='#ffffff';
-
-// ═══════════════════════════════════════════════
-//  APP STATE
+//  STATE
 // ═══════════════════════════════════════════════
 let layers=[], activeIdx=0;
 let view={x:0,y:0,scale:1};
+
+// ─── Pen stroke state ───────────────────────────
+// penActive / penPtrId track the in-progress stroke.
+// IMPORTANT: lostpointercapture is NOT used as a pen-end signal.
+// Reason: iOS reuses the same pointerId (always 1) for Apple Pencil.
+// If lostpointercapture for stroke N fires after stroke N+1's pointerdown
+// has already set penPtrId back to 1, it would incorrectly kill stroke N+1.
+// pointerup + pointercancel are sufficient to cover all pen-end cases.
 let penActive=false, penPtrId=null;
-let lastDrawPt=null;   // last point actually drawn (smoothed canvas coords)
-let _op='';
+let lastDrawPt=null, _op='';
+
 let eraserOn=false, erbMode='toggle', erbLocked=true;
+
+// ─── History ────────────────────────────────────
+// Uses bit-packed alpha (1 bit/px) instead of toDataURL.
+// toDataURL PNG for 2360×1640 takes ~100-500ms (blocks event queue).
+// getImageData + bit-pack takes ~5-15ms (negligible).
+// This prevents the JS event queue from stalling between consecutive strokes.
 let history=[], histIdx=-1;
+
+// ─── Brush ──────────────────────────────────────
+let bSize=12, bMin=1, bPressure=true, bCurve=2.0, bThresh=0.03, eSize=20;
+let stabLen=1;
+let bgColor='#ffffff';
+
+// ─── Touch nav ──────────────────────────────────
 let ptrs=new Map(), maxTC=0, touchMoved=false, panBase=null, pinchBase=null;
 let openPanel=null, pendingSize=null;
 
-// ═══════════════════════════════════════════════
-//  STABILIZATION BUFFER  (rolling-average smoother)
-//  Works in CANVAS space (after s2c).
-//  stabLen=1  → identical to no smoothing (passthrough)
-//  stabLen=N  → centroid of last N points → smooth, slightly lagging
-// ═══════════════════════════════════════════════
+// ─── Stabilizer buffer ──────────────────────────
 let stabBuf=[];
-
 function stabClear(){ stabBuf=[]; }
-
-// Add a canvas-space point; return the smoothed centroid
 function stabAdd(pt){
-  stabBuf.push({x:pt.x, y:pt.y});
-  if(stabBuf.length > stabLen) stabBuf.shift();
+  stabBuf.push({x:pt.x,y:pt.y});
+  if(stabBuf.length>stabLen) stabBuf.shift();
   const n=stabBuf.length;
-  return {
-    x: stabBuf.reduce((a,p)=>a+p.x,0)/n,
-    y: stabBuf.reduce((a,p)=>a+p.y,0)/n
-  };
+  return{x:stabBuf.reduce((a,p)=>a+p.x,0)/n, y:stabBuf.reduce((a,p)=>a+p.y,0)/n};
 }
-
-// Flush remaining buffered points toward actual endpoint (tail correction).
-// Draws from lastDrawPt toward pt in (stabBuf.length-1) steps.
-function stabFlush(ctx, endPt, d, hex, erase){
+function stabFlush(ctx,endPt,d,hex,erase){
   if(!lastDrawPt) return;
-  const steps=stabBuf.length;
-  if(steps<=1) return;
+  const steps=stabBuf.length; if(steps<=1) return;
   for(let i=1;i<=steps;i++){
     const t=i/steps;
     const ix=lastDrawPt.x+(endPt.x-lastDrawPt.x)*t;
@@ -360,54 +326,90 @@ function stabFlush(ctx, endPt, d, hex, erase){
 }
 
 // ═══════════════════════════════════════════════
-//  DIAMETER-BASED BINARY STAMPS
+//  FAST BIT-PACKED HISTORY
+//  Replaces toDataURL (~200-500ms) with raw alpha extraction (~5-15ms).
+//  Format: Uint8Array of ceil(W*H/8) bytes.
+//  Each bit = 1 iff that pixel has alpha>127.
+// ═══════════════════════════════════════════════
+function packAlpha(ctx, w, h){
+  const id=ctx.getImageData(0,0,w,h), src=id.data;
+  const n=w*h, packed=new Uint8Array((n+7)>>3);
+  for(let i=0;i<n;i++){
+    if(src[(i<<2)+3]>127) packed[i>>3]|=(1<<(i&7));
+  }
+  return packed;
+}
+
+function unpackAlpha(packed, ctx, w, h, hex){
+  const rv=parseInt(hex.slice(1,3),16), gv=parseInt(hex.slice(3,5),16), bv=parseInt(hex.slice(5,7),16);
+  const n=w*h, id=ctx.createImageData(w,h), dst=id.data;
+  for(let i=0;i<n;i++){
+    if(packed[i>>3]&(1<<(i&7))){
+      const b4=i<<2; dst[b4]=rv; dst[b4+1]=gv; dst[b4+2]=bv; dst[b4+3]=255;
+    }
+  }
+  ctx.putImageData(id,0,0);
+}
+
+function pushHistory(){
+  if(histIdx<history.length-1) history.length=histIdx+1;
+  history.push(layers.map(l=>({
+    bits:packAlpha(l.ctx,CW,CH),
+    opacity:l.opacity, color:l.color, name:l.name, visible:l.visible
+  })));
+  if(history.length>MAX_UNDO+1) history.shift(); else histIdx++;
+}
+
+function restoreSnap(snap){
+  snap.forEach((s,i)=>{
+    if(!layers[i]) return;
+    layers[i].ctx.globalCompositeOperation='source-over'; _op='';
+    layers[i].ctx.clearRect(0,0,CW,CH);
+    unpackAlpha(s.bits, layers[i].ctx, CW, CH, s.color);
+    layers[i].opacity=s.opacity; layers[i].canvas.style.opacity=s.opacity;
+    layers[i].color=s.color; layers[i].name=s.name;
+    layers[i].visible=s.visible; layers[i].canvas.style.display=s.visible?'':'none';
+  });
+  updateThumbs(); renderLayers();
+}
+
+function undo(){if(histIdx<=0){showToast('これ以上元に戻せません');return;} histIdx--; restoreSnap(history[histIdx]); showToast('元に戻す');}
+function redo(){if(histIdx>=history.length-1){showToast('やり直しはありません');return;} histIdx++; restoreSnap(history[histIdx]); showToast('やり直し');}
+
+// ═══════════════════════════════════════════════
+//  BINARY STAMP CACHE  (OffscreenCanvas, exact px, no AA)
 // ═══════════════════════════════════════════════
 const SC=new Map(), SE=new Map();
-
 function mkDS(d,hex){
-  d=Math.max(1,d|0);
-  const k=d+'|'+hex; if(SC.has(k)) return SC.get(k);
+  d=Math.max(1,d|0); const k=d+'|'+hex; if(SC.has(k)) return SC.get(k);
   const oc=new OffscreenCanvas(d,d), cx=oc.getContext('2d');
   const img=cx.createImageData(d,d), dt=img.data;
   const rv=parseInt(hex.slice(1,3),16), gv=parseInt(hex.slice(3,5),16), bv=parseInt(hex.slice(5,7),16);
   if(d===1){dt[0]=rv;dt[1]=gv;dt[2]=bv;dt[3]=255;}
-  else{
-    const cx_=(d-1)/2, cy_=(d-1)/2, r2=(d/2)*(d/2);
-    for(let y=0;y<d;y++) for(let x=0;x<d;x++){
-      const dx=x-cx_,dy=y-cy_;
-      if(dx*dx+dy*dy<r2){const i=(y*d+x)*4;dt[i]=rv;dt[i+1]=gv;dt[i+2]=bv;dt[i+3]=255;}
-    }
-  }
+  else{const cx_=(d-1)/2,cy_=(d-1)/2,r2=(d/2)*(d/2);
+    for(let y=0;y<d;y++) for(let x=0;x<d;x++){const dx=x-cx_,dy=y-cy_;if(dx*dx+dy*dy<r2){const i=(y*d+x)*4;dt[i]=rv;dt[i+1]=gv;dt[i+2]=bv;dt[i+3]=255;}}}
   cx.putImageData(img,0,0); SC.set(k,oc); return oc;
 }
-
 function mkES(d){
   d=Math.max(1,d|0); if(SE.has(d)) return SE.get(d);
   const oc=new OffscreenCanvas(d,d), cx=oc.getContext('2d');
   const img=cx.createImageData(d,d), dt=img.data;
   if(d===1){dt[3]=255;}
-  else{
-    const cx_=(d-1)/2, cy_=(d-1)/2, r2=(d/2)*(d/2);
-    for(let y=0;y<d;y++) for(let x=0;x<d;x++){
-      const dx=x-cx_,dy=y-cy_;
-      if(dx*dx+dy*dy<r2) dt[(y*d+x)*4+3]=255;
-    }
-  }
+  else{const cx_=(d-1)/2,cy_=(d-1)/2,r2=(d/2)*(d/2);
+    for(let y=0;y<d;y++) for(let x=0;x<d;x++){const dx=x-cx_,dy=y-cy_;if(dx*dx+dy*dy<r2)dt[(y*d+x)*4+3]=255;}}
   cx.putImageData(img,0,0); SE.set(d,oc); return oc;
 }
 
 // ═══════════════════════════════════════════════
 //  PRESSURE → DIAMETER
-//  FIX: if pressure===0 at contact (Apple Pencil ramp-up),
-//       treat it as bMin so a tap always produces a visible dot.
+//  isFirst=true: treat p=0 as bMin (Apple Pencil contact ramp-up)
 // ═══════════════════════════════════════════════
-function calcD(pressure, isFirstContact){
+function calcD(pressure,isFirst){
   if(eraserOn) return Math.max(1,eSize|0);
   if(!bPressure) return Math.max(1,bSize|0);
   const p=Math.max(0,Math.min(1,pressure||0));
-  // First contact with pressure=0 → guarantee a dot at bMin
-  if(isFirstContact && p===0) return Math.max(1,bMin|0);
-  if(p<bThresh) return 0;  // sub-threshold: skip draw, keep tracking pos
+  if(isFirst&&p===0) return Math.max(1,bMin|0);
+  if(p<bThresh) return 0;
   const norm=(p-bThresh)/(1-bThresh+1e-9);
   const d=bMin+(bSize-bMin)*Math.pow(norm,bCurve);
   return Math.max(bMin,Math.min(bSize,Math.round(d)))|0;
@@ -422,80 +424,49 @@ function setGCO(ctx,erase){
 }
 function doDot(ctx,x,y,d,hex,erase){
   setGCO(ctx,erase);
-  const half=d>>1;
-  ctx.drawImage(erase?mkES(d):mkDS(d,hex),(x+.5|0)-half,(y+.5|0)-half);
+  const h=d>>1; ctx.drawImage(erase?mkES(d):mkDS(d,hex),(x+.5|0)-h,(y+.5|0)-h);
 }
 function doLine(ctx,x0,y0,x1,y1,d,hex,erase){
   setGCO(ctx,erase);
   const st=erase?mkES(d):mkDS(d,hex);
-  const half=d>>1, dx=x1-x0, dy=y1-y0, dist=Math.sqrt(dx*dx+dy*dy);
+  const h=d>>1, dx=x1-x0, dy=y1-y0, dist=Math.sqrt(dx*dx+dy*dy);
   const step=Math.max(1,d<=2?1:Math.floor(d*.45));
   const n=Math.max(1,Math.ceil(dist/step));
-  for(let i=0;i<=n;i++){
-    const t=i/n;
-    ctx.drawImage(st,(x0+dx*t+.5|0)-half,(y0+dy*t+.5|0)-half);
-  }
+  for(let i=0;i<=n;i++){const t=i/n; ctx.drawImage(st,(x0+dx*t+.5|0)-h,(y0+dy*t+.5|0)-h);}
 }
 function s2c(sx,sy){return{x:(sx-view.x)/view.scale,y:(sy-view.y)/view.scale};}
 
 // ═══════════════════════════════════════════════
-//  STROKE LOGIC  (stabilization integrated)
-//
-//  beginStroke:
-//    - clears stabBuf
-//    - draws dot at stabAdd(pt) → even with stabLen>1, first pt is exact
-//    - ALWAYS draws at minimum bMin if pressure is zero (first-contact fix)
-//
-//  continueStroke:
-//    - calls stabAdd to get smoothed position
-//    - draws line from lastDrawPt to smoothed pos
-//    - updates lastDrawPt to smoothed pos
-//    - raw pos is ALWAYS saved so next stabAdd has correct window
-//    (pressure=0 mid-stroke → d=0 → skip draw but still advance position)
-//
-//  finishStroke:
-//    - flushes remaining buffer toward actual pen-lift position
-//    - resets state
+//  STROKE LOGIC
 // ═══════════════════════════════════════════════
 function beginStroke(sx,sy,pressure){
   const l=layers[activeIdx]; if(!l||!l.visible) return;
   _op=''; stabClear();
-  const rawPt=s2c(sx,sy);
-  const sPt=stabAdd(rawPt);  // first point: stabBuf=[rawPt], centroid=rawPt
-  const d=calcD(pressure, true);
-  if(d>0){
-    doDot(l.ctx,sPt.x,sPt.y,d,l.color,eraserOn);
-    lastDrawPt=sPt;
-  } else {
-    lastDrawPt=sPt;  // track position even if not drawn
-  }
+  const pt=s2c(sx,sy), sPt=stabAdd(pt), d=calcD(pressure,true);
+  if(d>0) doDot(l.ctx,sPt.x,sPt.y,d,l.color,eraserOn);
+  lastDrawPt=sPt;
 }
-
 function continueStroke(sx,sy,pressure){
   const l=layers[activeIdx]; if(!l||!l.visible) return;
-  const rawPt=s2c(sx,sy);
-  const sPt=stabAdd(rawPt);
-  const d=calcD(pressure, false);
+  const pt=s2c(sx,sy), sPt=stabAdd(pt), d=calcD(pressure,false);
   if(d>0){
     if(lastDrawPt) doLine(l.ctx,lastDrawPt.x,lastDrawPt.y,sPt.x,sPt.y,d,l.color,eraserOn);
     else           doDot(l.ctx,sPt.x,sPt.y,d,l.color,eraserOn);
     lastDrawPt=sPt;
   } else {
-    // pressure sub-threshold: advance position, skip drawing
-    // sPt is still tracked via stabBuf so recovery has no jump
-    lastDrawPt=sPt;
+    lastDrawPt=sPt; // advance position even when pressure is sub-threshold
   }
 }
-
 function finishStroke(sx,sy,pressure){
   const l=layers[activeIdx];
   if(l&&l.visible&&sx!=null){
-    // Flush buffered points to actual lift position
-    const rawPt=s2c(sx,sy);
-    const d=calcD(pressure||bThresh+.001, false);
-    if(d>0) stabFlush(l.ctx,rawPt,d,l.color,eraserOn);
+    const endPt=s2c(sx,sy);
+    // Use last valid drawn size or bMin for flush
+    const d=eraserOn?Math.max(1,eSize|0):Math.max(1,bMin|0);
+    stabFlush(l.ctx,endPt,d,l.color,eraserOn);
   }
   lastDrawPt=null; stabClear(); _op='';
+  // pushHistory is ~5-15ms (bit-pack) — fast enough to call synchronously
   updateThumbs(); pushHistory();
 }
 
@@ -503,59 +474,32 @@ function finishStroke(sx,sy,pressure){
 //  LAYERS
 // ═══════════════════════════════════════════════
 function addLayer(name,color){
-  const cv=document.createElement('canvas');
-  cv.width=CW;cv.height=CH;cv.className='lc';
-  const ctx=cv.getContext('2d');ctx.imageSmoothingEnabled=false;
+  const cv=document.createElement('canvas'); cv.width=CW; cv.height=CH; cv.className='lc';
+  const ctx=cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
   const l={id:(Date.now()*1000+Math.random()*999)|0,name,canvas:cv,ctx,opacity:1,color:color||'#000000',visible:true};
-  layers.push(l);activeIdx=layers.length-1;
-  document.getElementById('paper').appendChild(cv);return l;
+  layers.push(l); activeIdx=layers.length-1;
+  document.getElementById('paper').appendChild(cv); return l;
 }
 function recolorLayer(layer,hex){
-  const id=layer.ctx.getImageData(0,0,CW,CH),d=id.data;
-  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
-  for(let i=0;i<d.length;i+=4)if(d[i+3]>0){d[i]=r;d[i+1]=g;d[i+2]=b;}
-  layer.ctx.putImageData(id,0,0);layer.color=hex;SC.clear();updateThumbs();
+  const id=layer.ctx.getImageData(0,0,CW,CH), d=id.data;
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  for(let i=0;i<d.length;i+=4) if(d[i+3]>0){d[i]=r;d[i+1]=g;d[i+2]=b;}
+  layer.ctx.putImageData(id,0,0); layer.color=hex; SC.clear(); updateThumbs();
 }
 function updateThumbs(){
   layers.forEach(l=>{
-    const el=document.getElementById('th-'+l.id);if(!el)return;
-    const ctx=el.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,36,36);ctx.drawImage(l.canvas,0,0,36,36);
+    const el=document.getElementById('th-'+l.id); if(!el) return;
+    const ctx=el.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,36,36); ctx.drawImage(l.canvas,0,0,36,36);
   });
 }
-
-// ═══════════════════════════════════════════════
-//  UNDO / REDO
-// ═══════════════════════════════════════════════
-function pushHistory(){
-  if(histIdx<history.length-1)history.length=histIdx+1;
-  history.push(layers.map(l=>({url:l.canvas.toDataURL('image/png'),opacity:l.opacity,color:l.color,name:l.name,visible:l.visible})));
-  if(history.length>MAX_UNDO+1)history.shift();else histIdx++;
-}
-function restoreSnap(snap){
-  snap.forEach((s,i)=>{
-    if(!layers[i])return;
-    const img=new Image();
-    img.onload=()=>{
-      const ctx=layers[i].ctx;ctx.globalCompositeOperation='source-over';_op='';
-      ctx.clearRect(0,0,CW,CH);ctx.drawImage(img,0,0);
-      layers[i].opacity=s.opacity;layers[i].canvas.style.opacity=s.opacity;
-      layers[i].color=s.color;layers[i].name=s.name;
-      layers[i].visible=s.visible;layers[i].canvas.style.display=s.visible?'':'none';
-    };
-    img.src=s.url;
-  });
-  setTimeout(()=>{updateThumbs();renderLayers();},80);
-}
-function undo(){if(histIdx<=0){showToast('これ以上元に戻せません');return;}histIdx--;restoreSnap(history[histIdx]);showToast('元に戻す');}
-function redo(){if(histIdx>=history.length-1){showToast('やり直しはありません');return;}histIdx++;restoreSnap(history[histIdx]);showToast('やり直し');}
 
 // ═══════════════════════════════════════════════
 //  VIEW
 // ═══════════════════════════════════════════════
 function fitView(){
-  const sw=window.innerWidth,sh=window.innerHeight;
+  const sw=window.innerWidth, sh=window.innerHeight;
   view.scale=Math.min(sw/CW,sh/CH)*.88;
-  view.x=(sw-CW*view.scale)/2;view.y=(sh-CH*view.scale)/2;applyView();
+  view.x=(sw-CW*view.scale)/2; view.y=(sh-CH*view.scale)/2; applyView();
 }
 function applyView(){
   document.getElementById('cw').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.scale})`;
@@ -567,77 +511,84 @@ function applyView(){
 // ═══════════════════════════════════════════════
 const prc=document.getElementById('prc');
 function updPRC(x,y,pressure){
-  prc.style.display='block';prc.style.left=x+'px';prc.style.top=y+'px';
-  const d=calcD(pressure||.5,false),sz=Math.max(3,d>0?d*view.scale:view.scale);
-  prc.style.width=sz+'px';prc.style.height=sz+'px';
+  prc.style.display='block'; prc.style.left=x+'px'; prc.style.top=y+'px';
+  const d=calcD(pressure||.5,false), sz=Math.max(3,d>0?d*view.scale:view.scale);
+  prc.style.width=sz+'px'; prc.style.height=sz+'px';
   prc.style.borderColor=eraserOn?'rgba(248,113,113,.75)':'rgba(255,255,255,.7)';
 }
 
 // ═══════════════════════════════════════════════
 //  CANVAS POINTER EVENTS
-//  Pen: capture:true → exclusive priority, flushes touch state on entry
-//  Touch: pan / pinch / 2-finger undo / 3-finger redo
+//
+//  BUG ROOT CAUSE (fixed here):
+//  iOS Apple Pencil always reuses pointerId=1.
+//  If lostpointercapture for stroke N fires AFTER stroke N+1's pointerdown
+//  (which re-sets penPtrId=1), the old lostpointercapture incorrectly
+//  terminates stroke N+1.
+//
+//  FIX: DO NOT handle lostpointercapture for pen.
+//  pointerup  → covers normal pen lift
+//  pointercancel → covers system interruption
+//  These two are sufficient. lostpointercapture is intentionally omitted.
 // ═══════════════════════════════════════════════
 const ca=document.getElementById('ca');
 ca.addEventListener('contextmenu',e=>e.preventDefault());
 
-// Flush all touch navigation state when pen takes over
 function flushTouchState(){ptrs.clear();maxTC=0;touchMoved=false;panBase=null;pinchBase=null;}
 
-// PEN — capture:true runs before any bubble-phase touch handler
+// PEN — capture:true ensures we get events even when pen moves outside element
 ca.addEventListener('pointerdown',function(e){
-  if(e.pointerType!=='pen')return;
-  e.preventDefault();e.stopImmediatePropagation();
-  if(penActive)return;
-  flushTouchState();
-  try{ca.setPointerCapture(e.pointerId);}catch(_){}
-  penActive=true;penPtrId=e.pointerId;
+  if(e.pointerType!=='pen') return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  if(penActive) return; // already in a stroke (shouldn't happen, safety guard)
+  flushTouchState();    // clear any resting-hand touch state
+  try{ ca.setPointerCapture(e.pointerId); }catch(_){}
+  penActive=true; penPtrId=e.pointerId;
   updPRC(e.clientX,e.clientY,e.pressure);
   beginStroke(e.clientX,e.clientY,e.pressure);
 },{passive:false,capture:true});
 
 ca.addEventListener('pointermove',function(e){
-  if(e.pointerType!=='pen'||!penActive||e.pointerId!==penPtrId)return;
+  if(e.pointerType!=='pen'||!penActive||e.pointerId!==penPtrId) return;
   e.preventDefault();
   updPRC(e.clientX,e.clientY,e.pressure);
   const evs=(e.getCoalescedEvents&&e.getCoalescedEvents().length>0)?e.getCoalescedEvents():[e];
-  for(const ev of evs)continueStroke(ev.clientX,ev.clientY,ev.pressure);
+  for(const ev of evs) continueStroke(ev.clientX,ev.clientY,ev.pressure);
 },{passive:false});
 
+// penEnd: called by pointerup and pointercancel only — NOT lostpointercapture
 function penEnd(e){
-  if(!penActive||e.pointerId!==penPtrId)return;
-  try{e.preventDefault();}catch(_){}
+  if(!penActive||e.pointerId!==penPtrId) return;
+  try{ e.preventDefault(); }catch(_){}
   prc.style.display='none';
-  penActive=false;penPtrId=null;
+  // Reset pen state FIRST, before finishStroke, so if finishStroke takes any
+  // time, a new pointerdown can start cleanly without seeing penActive=true
+  penActive=false; penPtrId=null;
   finishStroke(e.clientX,e.clientY,e.pressure);
 }
-ca.addEventListener('pointerup',    e=>{if(e.pointerType==='pen')penEnd(e);},{passive:false});
-ca.addEventListener('pointercancel',e=>{if(e.pointerType==='pen')penEnd(e);},{passive:false});
-ca.addEventListener('lostpointercapture',e=>{if(penActive&&e.pointerId===penPtrId)penEnd(e);},{passive:false});
+ca.addEventListener('pointerup',    e=>{ if(e.pointerType==='pen') penEnd(e); },{passive:false});
+ca.addEventListener('pointercancel',e=>{ if(e.pointerType==='pen') penEnd(e); },{passive:false});
+// NOTE: lostpointercapture intentionally NOT registered for pen — see comment above
 
-// TOUCH
+// TOUCH — pan / pinch / 2-finger undo / 3-finger redo
 function touchPtrs(){return[...ptrs.values()].filter(p=>p.type==='touch');}
 ca.addEventListener('pointerdown',function(e){
-  if(e.pointerType!=='touch')return;
+  if(e.pointerType!=='touch') return;
   if(penActive){e.preventDefault();return;}
   e.preventDefault();
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:'touch',sx:e.clientX,sy:e.clientY,t:Date.now()});
-  const tp=touchPtrs();maxTC=Math.max(maxTC,tp.length);touchMoved=false;
+  const tp=touchPtrs(); maxTC=Math.max(maxTC,tp.length); touchMoved=false;
   if(tp.length===1){panBase={px:e.clientX,py:e.clientY,vx:view.x,vy:view.y};pinchBase=null;}
-  else if(tp.length===2){
-    const[a,b]=tp;
-    pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};
-    panBase=null;
-  }
+  else if(tp.length===2){const[a,b]=tp;pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};panBase=null;}
 },{passive:false});
 ca.addEventListener('pointermove',function(e){
-  if(e.pointerType!=='touch')return;
+  if(e.pointerType!=='touch') return;
   if(penActive){e.preventDefault();return;}
   e.preventDefault();
-  const prev=ptrs.get(e.pointerId);if(!prev)return;
+  const prev=ptrs.get(e.pointerId); if(!prev) return;
   ptrs.set(e.pointerId,{...prev,x:e.clientX,y:e.clientY});
   const tp=touchPtrs();
-  if(Math.abs(e.clientX-prev.sx)>4||Math.abs(e.clientY-prev.sy)>4)touchMoved=true;
+  if(Math.abs(e.clientX-prev.sx)>4||Math.abs(e.clientY-prev.sy)>4) touchMoved=true;
   if(tp.length===1&&panBase){view.x=panBase.vx+(e.clientX-panBase.px);view.y=panBase.vy+(e.clientY-panBase.py);applyView();}
   else if(tp.length===2&&pinchBase){
     const[a,b]=tp,dist=Math.hypot(b.x-a.x,b.y-a.y);
@@ -646,21 +597,21 @@ ca.addEventListener('pointermove',function(e){
   }
 },{passive:false});
 ca.addEventListener('pointerup',function(e){
-  if(e.pointerType!=='touch')return;e.preventDefault();
-  const p=ptrs.get(e.pointerId);ptrs.delete(e.pointerId);
-  const elapsed=p?Date.now()-p.t:999,moved=p?Math.hypot(e.clientX-p.sx,e.clientY-p.sy):999;
+  if(e.pointerType!=='touch') return; e.preventDefault();
+  const p=ptrs.get(e.pointerId); ptrs.delete(e.pointerId);
+  const elapsed=p?Date.now()-p.t:999, moved=p?Math.hypot(e.clientX-p.sx,e.clientY-p.sy):999;
   const tap=!touchMoved&&elapsed<300&&moved<16;
   const tp=touchPtrs();
   if(tp.length===0){if(tap&&!penActive){if(maxTC>=3)redo();else if(maxTC===2)undo();}maxTC=0;touchMoved=false;panBase=null;pinchBase=null;}
   else if(tp.length===1){const[rem]=tp;panBase={px:rem.x,py:rem.y,vx:view.x,vy:view.y};pinchBase=null;}
 },{passive:false});
 ca.addEventListener('pointercancel',function(e){
-  if(e.pointerType!=='touch')return;ptrs.delete(e.pointerId);
+  if(e.pointerType!=='touch') return; ptrs.delete(e.pointerId);
   if(touchPtrs().length===0){maxTC=0;touchMoved=false;panBase=null;pinchBase=null;}
 },{passive:false});
 ca.addEventListener('pointerdown',e=>{
-  if(e.pointerType==='pen')return;
-  if(openPanel)closePanel();
+  if(e.pointerType==='pen') return;
+  if(openPanel) closePanel();
   document.getElementById('sz-panel').classList.remove('open');
   document.getElementById('sv-panel').classList.remove('open');
 },{passive:true});
@@ -668,23 +619,23 @@ ca.addEventListener('pointerdown',e=>{
 // ═══════════════════════════════════════════════
 //  ERASER BUTTON
 // ═══════════════════════════════════════════════
-const erb=document.getElementById('erb'),badge=document.getElementById('badge');
-let erbY=0,erbPD=false,erbDSY=0,erbDBY=0,erbMov=false;
-function initErbY(){erbY=window.innerHeight/2;erb.style.top=erbY+'px';}
-function setEraser(v){eraserOn=v;erb.classList.toggle('on',v);badge.classList.toggle('show',v);}
+const erb=document.getElementById('erb'), badge=document.getElementById('badge');
+let erbY=0, erbPD=false, erbDSY=0, erbDBY=0, erbMov=false;
+function initErbY(){erbY=window.innerHeight/2; erb.style.top=erbY+'px';}
+function setEraser(v){eraserOn=v; erb.classList.toggle('on',v); badge.classList.toggle('show',v);}
 erb.addEventListener('pointerdown',function(e){
   e.preventDefault();e.stopPropagation();
   try{erb.setPointerCapture(e.pointerId);}catch(_){}
   erbPD=true;erbMov=false;erbDSY=e.clientY;erbDBY=erbY;
-  if(erbMode==='hold')setEraser(true);
+  if(erbMode==='hold') setEraser(true);
 },{passive:false});
 erb.addEventListener('pointermove',function(e){
-  if(!erbPD)return;e.preventDefault();
+  if(!erbPD) return; e.preventDefault();
   const dy=e.clientY-erbDSY;
   if(!erbLocked&&Math.abs(dy)>6){erbMov=true;erbY=Math.max(38,Math.min(window.innerHeight-38,erbDBY+dy));erb.style.top=erbY+'px';}
 },{passive:false});
 erb.addEventListener('pointerup',function(e){
-  if(!erbPD)return;e.preventDefault();e.stopPropagation();erbPD=false;
+  if(!erbPD) return; e.preventDefault();e.stopPropagation();erbPD=false;
   if(erbMode==='hold'){setEraser(false);}
   else if(!erbMov){setEraser(!eraserOn);showToast(eraserOn?'消しゴム ON':'ペン モード');}
   erbMov=false;
@@ -702,8 +653,12 @@ document.getElementById('lock-btn').addEventListener('pointerdown',e=>{
 // ═══════════════════════════════════════════════
 //  BACKGROUND COLOR
 // ═══════════════════════════════════════════════
-const bgInput=document.getElementById('bg-input'),bgSwatch=document.getElementById('bg-swatch');
-function applyBgColor(hex){bgColor=hex;bgSwatch.style.background=hex;bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid rgba(0,0,0,.18)':'none';document.getElementById('paper').style.background=hex;}
+const bgInput=document.getElementById('bg-input'), bgSwatch=document.getElementById('bg-swatch');
+function applyBgColor(hex){
+  bgColor=hex; bgSwatch.style.background=hex;
+  bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid rgba(0,0,0,.18)':'none';
+  document.getElementById('paper').style.background=hex;
+}
 applyBgColor('#ffffff');
 bgInput.addEventListener('input', e=>applyBgColor(e.target.value));
 bgInput.addEventListener('change',e=>applyBgColor(e.target.value));
@@ -715,12 +670,12 @@ const fileInput=document.getElementById('file-input');
 document.getElementById('open-btn').addEventListener('click',()=>fileInput.click());
 document.getElementById('open-btn').addEventListener('pointerdown',e=>e.stopPropagation());
 fileInput.addEventListener('change',function(){
-  const file=this.files[0];if(!file)return;
+  const file=this.files[0]; if(!file) return;
   const reader=new FileReader();
   reader.onload=ev=>{
     const img=new Image();
     img.onload=()=>{
-      const l=layers[activeIdx];if(!l)return;
+      const l=layers[activeIdx]; if(!l) return;
       const scale=Math.min(CW/img.width,CH/img.height);
       const sw=Math.round(img.width*scale),sh=Math.round(img.height*scale);
       const ox=Math.round((CW-sw)/2),oy=Math.round((CH-sh)/2);
@@ -732,7 +687,7 @@ fileInput.addEventListener('change',function(){
     };
     img.src=ev.target.result;
   };
-  reader.readAsDataURL(file);this.value='';
+  reader.readAsDataURL(file); this.value='';
 });
 
 // ═══════════════════════════════════════════════
@@ -746,13 +701,13 @@ function openPanelFn(id){
   document.getElementById(PANELS[id]).classList.add('open');
   document.getElementById(TABS[id]).classList.add('act');
   document.getElementById('rtabs').classList.add('shifted');
-  if(id==='layers')renderLayers();
+  if(id==='layers') renderLayers();
 }
 function closePanel(reset=true){
   Object.values(PANELS).forEach(p=>document.getElementById(p).classList.remove('open'));
   Object.values(TABS).forEach(t=>document.getElementById(t).classList.remove('act'));
   document.getElementById('rtabs').classList.remove('shifted');
-  if(reset)openPanel=null;
+  if(reset) openPanel=null;
 }
 ['br','er','ly'].forEach(k=>{
   const m={br:'brush',er:'eraser',ly:'layers'};
@@ -760,15 +715,15 @@ function closePanel(reset=true){
 });
 
 // ═══════════════════════════════════════════════
-//  INERTIA SLIDER
+//  INERTIA SLIDER  (5 px drag = 1 step)
 // ═══════════════════════════════════════════════
 function initCsl(id,initVal,onChange){
-  const el=document.getElementById(id);if(!el)return;
-  const min=+(el.dataset.min||0),max=+(el.dataset.max||100),ratio=+(el.dataset.ratio||5);
+  const el=document.getElementById(id); if(!el) return;
+  const min=+(el.dataset.min||0), max=+(el.dataset.max||100), ratio=+(el.dataset.ratio||5);
   let val=Math.max(min,Math.min(max,initVal|0));
-  let ptDown=false,startX=0,startVal=0;
+  let ptDown=false, startX=0, startVal=0;
   el.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
-  const fill=el.querySelector('.csl-fill'),knob=el.querySelector('.csl-knob');
+  const fill=el.querySelector('.csl-fill'), knob=el.querySelector('.csl-knob');
   function render(){const p=(val-min)/(max-min)*100;fill.style.width=p+'%';knob.style.left=p+'%';}
   function apply(v){val=Math.max(min,Math.min(max,Math.round(v)));render();onChange(val);}
   el.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);ptDown=true;startX=e.clientX;startVal=val;},{passive:false});
@@ -782,39 +737,39 @@ function initCsl(id,initVal,onChange){
 //  LAYER UI
 // ═══════════════════════════════════════════════
 function renderLayers(){
-  const list=document.getElementById('llist');list.innerHTML='';
+  const list=document.getElementById('llist'); list.innerHTML='';
   [...layers].reverse().forEach((layer,ri)=>{
     const i=layers.length-1-ri;
-    const item=document.createElement('div');item.className='li'+(i===activeIdx?' act':'');
-    const tw=document.createElement('div');tw.className='lthumb';
-    const tc=document.createElement('canvas');tc.id='th-'+layer.id;tc.width=36;tc.height=36;
-    const tctx=tc.getContext('2d');tctx.fillStyle='#fff';tctx.fillRect(0,0,36,36);tctx.drawImage(layer.canvas,0,0,36,36);
+    const item=document.createElement('div'); item.className='li'+(i===activeIdx?' act':'');
+    const tw=document.createElement('div'); tw.className='lthumb';
+    const tc=document.createElement('canvas'); tc.id='th-'+layer.id; tc.width=36; tc.height=36;
+    const tctx=tc.getContext('2d'); tctx.fillStyle='#fff'; tctx.fillRect(0,0,36,36); tctx.drawImage(layer.canvas,0,0,36,36);
     tw.appendChild(tc);
-    const info=document.createElement('div');info.className='linfo';
-    const nm=document.createElement('div');nm.className='lname';nm.textContent=layer.name;
-    const opr=document.createElement('div');opr.className='loprow';
-    const ocsl=document.createElement('div');ocsl.className='csl';ocsl.dataset.min='0';ocsl.dataset.max='100';ocsl.dataset.ratio='3';
-    const oval=document.createElement('span');oval.textContent=Math.round(layer.opacity*100)+'%';
-    opr.appendChild(ocsl);opr.appendChild(oval);info.appendChild(nm);info.appendChild(opr);
-    const cd=document.createElement('div');cd.className='lcd';cd.style.background=layer.color;
-    const ci=document.createElement('input');ci.type='color';ci.value=layer.color;
+    const info=document.createElement('div'); info.className='linfo';
+    const nm=document.createElement('div'); nm.className='lname'; nm.textContent=layer.name;
+    const opr=document.createElement('div'); opr.className='loprow';
+    const ocsl=document.createElement('div'); ocsl.className='csl'; ocsl.dataset.min='0'; ocsl.dataset.max='100'; ocsl.dataset.ratio='3';
+    const oval=document.createElement('span'); oval.textContent=Math.round(layer.opacity*100)+'%';
+    opr.appendChild(ocsl); opr.appendChild(oval); info.appendChild(nm); info.appendChild(opr);
+    const cd=document.createElement('div'); cd.className='lcd'; cd.style.background=layer.color;
+    const ci=document.createElement('input'); ci.type='color'; ci.value=layer.color;
     ci.addEventListener('input',ev=>{cd.style.background=ev.target.value;recolorLayer(layer,ev.target.value);});
     ci.addEventListener('change',()=>pushHistory());
     cd.appendChild(ci);
-    const vb=document.createElement('button');vb.className='lvis';vb.textContent=layer.visible?'👁':'—';
+    const vb=document.createElement('button'); vb.className='lvis'; vb.textContent=layer.visible?'👁':'—';
     vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;layer.canvas.style.display=layer.visible?'':'none';vb.textContent=layer.visible?'👁':'—';});
-    const db=document.createElement('button');db.className='ldel';db.textContent='✕';
+    const db=document.createElement('button'); db.className='ldel'; db.textContent='✕';
     db.addEventListener('pointerdown',e=>{
-      e.stopPropagation();if(layers.length<=1){showToast('レイヤーは最低1枚');return;}
-      layer.canvas.remove();layers.splice(i,1);activeIdx=Math.min(activeIdx,layers.length-1);pushHistory();renderLayers();
+      e.stopPropagation(); if(layers.length<=1){showToast('レイヤーは最低1枚');return;}
+      layer.canvas.remove(); layers.splice(i,1); activeIdx=Math.min(activeIdx,layers.length-1); pushHistory(); renderLayers();
     });
-    item.appendChild(tw);item.appendChild(info);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
+    item.appendChild(tw); item.appendChild(info); item.appendChild(cd); item.appendChild(vb); item.appendChild(db);
     item.addEventListener('pointerdown',e=>{if(e.target===ci||e.target===cd||e.target===vb||e.target===db)return;activeIdx=i;renderLayers();});
     list.appendChild(item);
     (function(el2,lay){
-      const mn=0,mx=100,rt=3;let val2=Math.round(lay.opacity*100),ptD=false,sX=0,sV=0;
+      const mn=0,mx=100,rt=3; let val2=Math.round(lay.opacity*100),ptD=false,sX=0,sV=0;
       el2.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
-      const f2=el2.querySelector('.csl-fill'),k2=el2.querySelector('.csl-knob');
+      const f2=el2.querySelector('.csl-fill'), k2=el2.querySelector('.csl-knob');
       function r2(){const p=(val2-mn)/(mx-mn)*100;f2.style.width=p+'%';k2.style.left=p+'%';}
       function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;lay.canvas.style.opacity=lay.opacity;oval.textContent=val2+'%';}
       el2.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();el2.setPointerCapture(e.pointerId);ptD=true;sX=e.clientX;sV=val2;},{passive:false});
@@ -826,7 +781,8 @@ function renderLayers(){
   });
 }
 document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
-  e.preventDefault();e.stopPropagation();addLayer('レイヤー '+(layers.length+1),'#000000');pushHistory();renderLayers();
+  e.preventDefault();e.stopPropagation();
+  addLayer('レイヤー '+(layers.length+1),'#000000');pushHistory();renderLayers();
 });
 
 // ═══════════════════════════════════════════════
@@ -851,7 +807,7 @@ szConfirm.addEventListener('pointerdown',e=>{
 });
 
 // ═══════════════════════════════════════════════
-//  SAVE
+//  SAVE — 令和ファイル名
 // ═══════════════════════════════════════════════
 function reiwaFn(){const n=new Date(),pad=v=>String(v).padStart(2,'0');return pad(n.getFullYear()-2018)+pad(n.getMonth()+1)+pad(n.getDate())+pad(n.getHours())+pad(n.getMinutes())+pad(n.getSeconds());}
 const svBtn=document.getElementById('sv-btn'),svPanel=document.getElementById('sv-panel');
@@ -876,7 +832,7 @@ document.addEventListener('pointerdown',e=>{
 },{passive:true,capture:false});
 
 // ═══════════════════════════════════════════════
-//  PRESSURE CURVE + STABILIZATION VISUAL
+//  VISUALS: CURVE + STABILIZER PREVIEW
 // ═══════════════════════════════════════════════
 function drawCurve(){
   const cv=document.getElementById('curve-cv');if(!cv)return;
@@ -899,29 +855,20 @@ function drawCurve(){
   ctx.fillStyle='rgba(255,255,255,.28)';ctx.font='9px "DM Mono",monospace';ctx.fillText('筆圧 →',3,H-3);ctx.fillText('↑ px',2,9);
   if(bPressure&&bSize>0){ctx.fillStyle='rgba(74,222,128,.6)';ctx.fillText('min '+bMin+'px',W-54,H-(bMin/bSize)*H-3);}
 }
-
 function drawStabPreview(){
   const cv=document.getElementById('stab-cv');if(!cv)return;
   const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
   ctx.clearRect(0,0,W,H);ctx.fillStyle='rgba(0,0,0,.3)';ctx.fillRect(0,0,W,H);
-  // Simulate a wobbly line and its smoothed version
-  const pts=[],spts=[];const buf=[];
+  const pts=[],spts=[],buf=[];
   for(let i=0;i<=W;i++){
-    const t=i/W;
-    const raw={x:i,y:H/2+Math.sin(t*20)*6+Math.sin(t*37)*3};
-    pts.push(raw);
-    buf.push(raw);if(buf.length>stabLen)buf.shift();
+    const t=i/W,raw={x:i,y:H/2+Math.sin(t*20)*6+Math.sin(t*37)*3};
+    pts.push(raw);buf.push(raw);if(buf.length>stabLen)buf.shift();
     const n=buf.length;spts.push({x:buf.reduce((a,p)=>a+p.x,0)/n,y:buf.reduce((a,p)=>a+p.y,0)/n});
   }
   ctx.strokeStyle='rgba(255,255,255,.2)';ctx.lineWidth=1;ctx.beginPath();pts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.stroke();
   ctx.strokeStyle='#5b9cf6';ctx.lineWidth=2;ctx.beginPath();spts.forEach((p,i)=>i===0?ctx.moveTo(p.x,p.y):ctx.lineTo(p.x,p.y));ctx.stroke();
-  ctx.fillStyle='rgba(255,255,255,.28)';ctx.font='9px "DM Mono",monospace';
-  ctx.fillText('白:原線  青:補正後',4,H-4);
+  ctx.fillStyle='rgba(255,255,255,.28)';ctx.font='9px "DM Mono",monospace';ctx.fillText('白:原線 青:補正後',4,H-4);
 }
-
-// ═══════════════════════════════════════════════
-//  RANGE FILL HELPER
-// ═══════════════════════════════════════════════
 function updRF(el){el.style.setProperty('--pct',((el.value-el.min)/(el.max-el.min)*100).toFixed(1)+'%');}
 
 // ═══════════════════════════════════════════════
@@ -939,16 +886,14 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
   addLayer('レイヤー 1','#000000');
   fitView();pushHistory();initErbY();
 
-  initCsl('csl-sz',  12, v=>{bSize=v;  document.getElementById('v-sz').textContent=v+'px'; SC.clear();drawCurve();});
-  initCsl('csl-msz',  1, v=>{bMin=v;   document.getElementById('v-msz').textContent=v+'px'; drawCurve();});
-  initCsl('csl-thr',  3, v=>{bThresh=v/100;document.getElementById('v-thr').textContent=v+'%';drawCurve();});
-  initCsl('csl-esz', 20, v=>{eSize=v;  document.getElementById('v-esz').textContent=v+'px';});
-  initCsl('csl-stab', 1, v=>{stabLen=v;document.getElementById('v-stab').textContent=v;drawStabPreview();});
+  initCsl('csl-sz',  12, v=>{bSize=v; document.getElementById('v-sz').textContent=v+'px'; SC.clear();drawCurve();});
+  initCsl('csl-msz',  1, v=>{bMin=v;  document.getElementById('v-msz').textContent=v+'px'; drawCurve();});
+  initCsl('csl-thr',  3, v=>{bThresh=v/100; document.getElementById('v-thr').textContent=v+'%'; drawCurve();});
+  initCsl('csl-esz', 20, v=>{eSize=v; document.getElementById('v-esz').textContent=v+'px';});
+  initCsl('csl-stab', 1, v=>{stabLen=v; document.getElementById('v-stab').textContent=v; drawStabPreview();});
 
-  const slCv=document.getElementById('sl-cv');
-  updRF(slCv);
+  const slCv=document.getElementById('sl-cv'); updRF(slCv);
   slCv.addEventListener('input',function(){bCurve=this.value/100;document.getElementById('v-cv').textContent=bCurve.toFixed(2);updRF(this);drawCurve();});
-
   document.getElementById('cb-pr').addEventListener('change',e=>{bPressure=e.target.checked;document.getElementById('pr-sec').style.opacity=bPressure?'1':'0.4';drawCurve();});
 
   drawCurve();drawStabPreview();
