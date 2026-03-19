@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>BinaryPaint</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap');
+:root{
+  --bg:#111113;--sf:rgba(20,20,26,.97);--sf2:rgba(30,30,38,.97);
+  --bd:rgba(255,255,255,.09);--bd2:rgba(255,255,255,.18);
+  --tx:rgba(255,255,255,.88);--tx2:rgba(255,255,255,.45);
+  --acc:#5b9cf6;--red:#f87171;--grn:#4ade80;
+  --pw:272px;--tw:34px;
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'Noto Sans JP',sans-serif;touch-action:none}
+#app{position:relative;width:100vw;height:100vh;overflow:hidden}
+
+/* ── Canvas ── */
+#ca{position:absolute;inset:0;overflow:hidden;touch-action:none}
+#cw{position:absolute;transform-origin:0 0;will-change:transform}
+#paper{position:relative;box-shadow:0 2px 32px rgba(0,0,0,.7),0 0 0 1px rgba(0,0,0,.3)}
+.lc{position:absolute;top:0;left:0;image-rendering:pixelated;image-rendering:crisp-edges}
+
+/* ── Top buttons ── */
+.topbtn{position:fixed;top:10px;z-index:220;background:var(--sf);border:1px solid var(--bd2);
+  border-radius:20px;padding:6px 12px;font-size:12px;color:var(--tx2);cursor:pointer;
+  display:flex;align-items:center;gap:5px;touch-action:manipulation}
+#sz-btn{left:10px}
+#bg-btn{left:calc(10px + 120px)}
+#sv-btn{right:calc(10px + 60px)}
+#fs-btn{right:10px;padding:5px 10px;font-size:16px}
+
+/* ── Top panels ── */
+.toppanel{position:fixed;top:44px;z-index:219;background:var(--sf);border:1px solid var(--bd2);
+  border-radius:12px;padding:10px;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.toppanel.open{display:block}
+#sz-panel{left:10px;min-width:215px}
+#sv-panel{right:10px;min-width:238px}
+
+.sz-opt{padding:9px 12px;border-radius:8px;font-size:13px;color:var(--tx);cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;
+  background:var(--sf2);border:1px solid var(--bd);touch-action:manipulation}
+.sz-opt.cur{border-color:var(--acc);color:var(--acc)}
+.sz-opt small{color:var(--tx2);font-size:10px;font-family:'DM Mono',monospace}
+#sz-confirm{width:100%;margin-top:4px;padding:8px;background:rgba(248,113,113,.14);
+  border:1px solid rgba(248,113,113,.38);border-radius:8px;color:var(--red);
+  font-size:11px;font-family:'Noto Sans JP',sans-serif;cursor:pointer;display:none;
+  line-height:1.5;touch-action:manipulation}
+
+#sv-name{width:100%;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;
+  padding:8px 10px;color:var(--tx);font-size:13px;outline:none;
+  font-family:'Noto Sans JP',sans-serif;margin-bottom:8px;touch-action:auto}
+#sv-name::placeholder{color:var(--tx2)}
+.sv-note{font-size:10px;color:var(--tx2);margin-bottom:8px;line-height:1.6}
+#sv-go{width:100%;padding:9px;background:rgba(91,156,246,.18);border:1px solid rgba(91,156,246,.38);
+  border-radius:8px;color:var(--acc);font-size:13px;font-family:'Noto Sans JP',sans-serif;
+  cursor:pointer;touch-action:manipulation}
+
+/* Background color button — color input sits ON the button */
+#bg-btn{padding:5px 10px;position:fixed;left:140px;overflow:visible}
+#bg-btn-inner{display:flex;align-items:center;gap:6px;pointer-events:none}
+#bg-swatch{width:20px;height:20px;border-radius:5px;border:1.5px solid rgba(255,255,255,.25);flex-shrink:0}
+#bg-label{font-size:12px}
+#bg-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;touch-action:manipulation;border:none;padding:0;margin:0}
+
+/* ── Right edge tabs ── */
+#rtabs{position:fixed;right:0;top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:4px;z-index:210;
+  transition:right .25s cubic-bezier(.4,0,.2,1)}
+#rtabs.shifted{right:var(--pw)}
+.rtab{width:var(--tw);height:54px;border:1px solid rgba(255,255,255,.16);border-right:none;
+  border-radius:8px 0 0 8px;display:flex;align-items:center;justify-content:center;
+  cursor:pointer;font-size:14px;touch-action:manipulation;flex-shrink:0}
+#tab-br{background:#1e1e24;color:rgba(255,255,255,.72)}
+#tab-er{background:#c6c6c6;color:#2a2a2a}
+#tab-ly{background:#787878;color:rgba(255,255,255,.88)}
+.rtab.act{outline:2px solid rgba(255,255,255,.32);outline-offset:-2px}
+
+/* ── Right panels ── */
+.rpanel{position:fixed;right:calc(-1 * var(--pw));top:50%;transform:translateY(-50%);
+  width:var(--pw);max-height:84vh;background:var(--sf);border:1px solid var(--bd2);
+  border-right:none;border-radius:14px 0 0 14px;z-index:205;
+  transition:right .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;
+  overflow:hidden;box-shadow:-6px 0 28px rgba(0,0,0,.5)}
+.rpanel.open{right:0}
+.ph{padding:12px 14px 9px;font-size:10px;font-weight:500;color:var(--tx2);
+  letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid var(--bd);
+  flex-shrink:0;display:flex;align-items:center;justify-content:space-between}
+.pb{padding:12px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch}
+#btn-addlayer{background:none;border:none;color:var(--acc);font-size:18px;cursor:pointer;
+  padding:0 4px;line-height:1;touch-action:manipulation}
+
+/* ── Form controls ── */
+.row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.row label{font-size:11px;color:var(--tx2);min-width:60px;flex-shrink:0}
+.row .val{font-size:11px;color:var(--tx);font-family:'DM Mono',monospace;min-width:34px;text-align:right;flex-shrink:0}
+.slabel{font-size:10px;color:var(--tx2);letter-spacing:.08em;text-transform:uppercase;margin:10px 0 6px;padding-left:2px}
+input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;
+  outline:none;touch-action:none;
+  background:linear-gradient(to right,var(--acc) 0%,var(--acc) var(--pct,50%),rgba(255,255,255,.15) var(--pct,50%))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;
+  border-radius:50%;background:var(--acc);cursor:pointer;touch-action:none}
+.togrow{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;padding:8px 10px;background:var(--sf2);border-radius:8px;border:1px solid var(--bd)}
+.togrow .lbl{font-size:12px;color:var(--tx)}
+.tog{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0}
+.tog input{opacity:0;width:0;height:0}
+.ttr{position:absolute;inset:0;background:rgba(255,255,255,.12);border-radius:20px;transition:background .2s;pointer-events:none}
+.tog input:checked+.ttr{background:var(--acc)}
+.tth{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform .2s;pointer-events:none}
+.tog input:checked~.tth{transform:translateX(16px)}
+#curve-cv{width:100%;height:68px;border-radius:8px;border:1px solid var(--bd);
+  background:rgba(0,0,0,.4);display:block;margin-bottom:10px}
+
+/* eraser lock row */
+#lock-row{display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:12px;padding:9px 12px;background:var(--sf2);border-radius:8px;border:1px solid var(--bd)}
+#lock-row .lbl{font-size:12px;color:var(--tx)}
+#lock-btn{background:none;border:1px solid var(--bd2);border-radius:8px;padding:4px 10px;
+  font-size:13px;color:var(--tx2);cursor:pointer;touch-action:manipulation}
+#lock-btn.unlocked{color:var(--red);border-color:rgba(248,113,113,.5)}
+
+/* ── Layers ── */
+.li{display:flex;align-items:center;gap:7px;padding:7px;border-radius:8px;
+  margin-bottom:5px;background:var(--sf2);border:1px solid transparent;cursor:pointer;touch-action:manipulation}
+.li.act{border-color:rgba(91,156,246,.5);background:rgba(91,156,246,.07)}
+.lthumb{width:36px;height:36px;border-radius:5px;background:#fff;border:1px solid var(--bd);
+  flex-shrink:0;overflow:hidden;position:relative}
+.lthumb canvas{position:absolute;inset:0;width:100%;height:100%}
+.linfo{flex:1;min-width:0}
+.lname{font-size:11px;font-weight:500;color:var(--tx);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loprow{display:flex;align-items:center;gap:4px}
+.loprow span{font-size:9px;color:var(--tx2);min-width:24px;text-align:right;font-family:'DM Mono',monospace}
+.lcd{width:18px;height:18px;border-radius:50%;border:2px solid var(--bd2);flex-shrink:0;cursor:pointer;position:relative;overflow:hidden}
+.lcd input[type=color]{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);opacity:0;cursor:pointer}
+.lvis,.ldel{width:22px;height:22px;background:none;border:none;font-size:12px;cursor:pointer;color:var(--tx2);flex-shrink:0;touch-action:manipulation}
+
+/* ── Eraser toggle button (left side) ── */
+#erb{position:fixed;left:5px;
+  width:76px;height:76px;border-radius:50%;
+  background:var(--sf);border:2px solid var(--bd2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  z-index:200;cursor:pointer;touch-action:manipulation;
+  box-shadow:0 2px 14px rgba(0,0,0,.5);
+  transition:background .15s,border-color .15s,color .15s;
+  -webkit-user-select:none;user-select:none}
+#erb .erb-icon{font-size:24px;line-height:1;color:var(--tx2);pointer-events:none}
+#erb .erb-label{font-size:8px;color:var(--tx2);font-family:'DM Mono',monospace;letter-spacing:.04em;pointer-events:none}
+#erb.on{background:rgba(248,113,113,.22);border-color:var(--red)}
+#erb.on .erb-icon{color:var(--red)}
+#erb.on .erb-label{color:var(--red)}
+#erb.draggable{border-style:dashed;border-color:rgba(248,113,113,.6)}
+
+/* ── Toast ── */
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(14px);
+  background:rgba(0,0,0,.74);color:#fff;padding:6px 18px;border-radius:18px;
+  font-size:12px;pointer-events:none;z-index:999;opacity:0;
+  transition:opacity .18s,transform .18s;white-space:nowrap;backdrop-filter:blur(8px)}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── Pen cursor ring ── */
+#prc{position:fixed;pointer-events:none;z-index:500;transform:translate(-50%,-50%);
+  border-radius:50%;border:1.5px solid rgba(255,255,255,.72);mix-blend-mode:difference;display:none}
+
+#zl{position:fixed;bottom:14px;right:14px;font-size:11px;font-family:'DM Mono',monospace;
+  color:var(--tx2);pointer-events:none;z-index:100}
+
+/* Mode indicator badge */
+#mode-badge{position:fixed;top:52px;left:50%;transform:translateX(-50%);
+  background:rgba(248,113,113,.85);color:#fff;padding:4px 14px;border-radius:14px;
+  font-size:11px;pointer-events:none;z-index:300;display:none;backdrop-filter:blur(4px)}
+#mode-badge.show{display:block}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="ca"><div id="cw"><div id="paper"></div></div></div>
+
+  <!-- top-left -->
+  <div class="topbtn" id="sz-btn">📐 <span id="sz-cur">2360×1640</span></div>
+
+  <!-- background color — color input directly on the button for iOS -->
+  <div class="topbtn" id="bg-btn">
+    <div id="bg-btn-inner">
+      <div id="bg-swatch"></div>
+      <span id="bg-label">背景色</span>
+    </div>
+    <input type="color" id="bg-input" value="#ffffff">
+  </div>
+
+  <!-- top-right -->
+  <div class="topbtn" id="sv-btn">💾 保存</div>
+  <div class="topbtn" id="fs-btn">⛶</div>
+
+  <!-- canvas size panel -->
+  <div class="toppanel" id="sz-panel">
+    <div class="sz-opt" data-w="1180" data-h="820">½x ハーフ <small>1180×820</small></div>
+    <div class="sz-opt cur" data-w="2360" data-h="1640">1x 標準 <small>2360×1640</small></div>
+    <div class="sz-opt" data-w="4720" data-h="3280">2x ダブル <small>4720×3280</small></div>
+    <button id="sz-confirm">⚠ タップで確定（描画消去）</button>
+  </div>
+
+  <!-- save panel -->
+  <div class="toppanel" id="sv-panel">
+    <input id="sv-name" type="text" placeholder="ファイル名（例: sketch_01）" autocomplete="off" spellcheck="false">
+    <div class="sv-note">各レイヤーを白地モノクロ2値 PNG で出力。<br>複数レイヤーは連番ファイル名。<br>ダウンロードフォルダに保存されます。</div>
+    <button id="sv-go">📥 PNG で出力</button>
+  </div>
+
+  <!-- right tabs -->
+  <div id="rtabs">
+    <div class="rtab" id="tab-br">✏</div>
+    <div class="rtab" id="tab-er">◉</div>
+    <div class="rtab" id="tab-ly">◫</div>
+  </div>
+
+  <!-- brush panel -->
+  <div class="rpanel" id="br-panel">
+    <div class="ph">ブラシ</div>
+    <div class="pb">
+      <div class="slabel">サイズ（直径 px）</div>
+      <div class="row"><label>最大</label><input type="range" id="sl-sz" min="1" max="200" value="12"><span class="val" id="v-sz">12px</span></div>
+      <div class="row"><label>最小</label><input type="range" id="sl-msz" min="1" max="100" value="1"><span class="val" id="v-msz">1px</span></div>
+      <div class="slabel">筆圧</div>
+      <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-pr" checked><div class="ttr"></div><div class="tth"></div></label></div>
+      <div id="pr-sec">
+        <div class="row"><label>閾値</label><input type="range" id="sl-thr" min="0" max="30" value="2"><span class="val" id="v-thr">2%</span></div>
+        <div class="slabel">筆圧カーブ（低=ソフト）</div>
+        <canvas id="curve-cv" width="240" height="68"></canvas>
+        <div class="row"><label>カーブ</label><input type="range" id="sl-cv" min="10" max="300" value="50"><span class="val" id="v-cv">0.50</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- eraser panel -->
+  <div class="rpanel" id="er-panel">
+    <div class="ph">消しゴム設定</div>
+    <div class="pb">
+      <div id="lock-row">
+        <span class="lbl">位置ロック</span>
+        <button id="lock-btn">🔒 ロック中</button>
+      </div>
+      <div class="slabel">消しゴムサイズ（直径 px）</div>
+      <div class="row"><label>サイズ</label><input type="range" id="sl-esz" min="1" max="300" value="20"><span class="val" id="v-esz">20px</span></div>
+      <div class="slabel">使い方</div>
+      <div style="font-size:11px;color:var(--tx2);line-height:1.85;background:var(--sf2);border-radius:8px;padding:10px;border:1px solid var(--bd)">
+        左端の大ボタンを<strong style="color:var(--tx)">タップ</strong>で消しゴム ON/OFF。<br>
+        🔓アンロック後にドラッグで位置変更。
+      </div>
+    </div>
+  </div>
+
+  <!-- layer panel -->
+  <div class="rpanel" id="ly-panel">
+    <div class="ph">レイヤー <button id="btn-addlayer">＋</button></div>
+    <div class="pb"><div id="llist"></div></div>
+  </div>
+
+  <div id="erb">
+    <div class="erb-icon">◉</div>
+    <div class="erb-label">ERASER</div>
+  </div>
+
+  <div id="mode-badge">消しゴム ON</div>
+  <div id="toast"></div>
+  <div id="prc"></div>
+  <div id="zl">100%</div>
+</div>
+
+<script>
+'use strict';
+// ═══════════════════════════════════════════════
+//  CONFIG / STATE
+// ═══════════════════════════════════════════════
+let CW = 2360, CH = 1640;
+const MAX_UNDO = 5;
+
+let layers = [], activeIdx = 0;
+let view = { x:0, y:0, scale:1 };
+
+// Pen state — managed exclusively in pen pointer handlers
+let penActive   = false;   // a pen pointer is currently down on canvas
+let penPtrId    = null;    // which pointerId is the active pen
+let lastPt      = null;
+let _op         = '';      // cached compositeOperation
+
+// Eraser toggle state
+let eraserOn    = false;
+let erbLocked   = true;
+
+// Brush params (all in pixels, diameter)
+let bSize=12, bMin=1, bPressure=true, bCurve=0.5, bThresh=0.02, eSize=20;
+let bgColor = '#ffffff';
+
+// Undo
+let history=[], histIdx=-1;
+
+// Touch navigation state
+let ptrs=new Map(), maxTC=0, touchMoved=false, panBase=null, pinchBase=null;
+
+// Panel
+let openPanel=null, pendingSize=null;
+
+// ═══════════════════════════════════════════════
+//  BINARY STAMP CACHE  (OffscreenCanvas, no AA)
+// ═══════════════════════════════════════════════
+const SC=new Map(), SE=new Map();
+
+function dToR(d) {
+  // diameter 1 → radius 0 (produces exact 1×1 stamp)
+  if (d <= 1) return 0;
+  return Math.round(d / 2);
+}
+
+function mkDS(r, hex) {
+  const k = r+'|'+hex;
+  if (SC.has(k)) return SC.get(k);
+  const dim = r===0 ? 1 : r*2+1;
+  const oc = new OffscreenCanvas(dim, dim);
+  const cx = oc.getContext('2d');
+  const img = cx.createImageData(dim, dim);
+  const dt = img.data;
+  const rv=parseInt(hex.slice(1,3),16), gv=parseInt(hex.slice(3,5),16), bv=parseInt(hex.slice(5,7),16);
+  if (r === 0) {
+    dt[0]=rv; dt[1]=gv; dt[2]=bv; dt[3]=255;
+  } else {
+    const r2=r*r;
+    for (let y=0;y<dim;y++) for (let x=0;x<dim;x++) {
+      const dx=x-r, dy=y-r;
+      if (dx*dx+dy*dy<=r2) { const i=(y*dim+x)*4; dt[i]=rv;dt[i+1]=gv;dt[i+2]=bv;dt[i+3]=255; }
+    }
+  }
+  cx.putImageData(img,0,0); SC.set(k,oc); return oc;
+}
+
+function mkES(r) {
+  if (SE.has(r)) return SE.get(r);
+  const dim = r===0 ? 1 : r*2+1;
+  const oc = new OffscreenCanvas(dim, dim);
+  const cx = oc.getContext('2d');
+  const img = cx.createImageData(dim, dim);
+  const dt = img.data;
+  if (r === 0) {
+    dt[3]=255;
+  } else {
+    const r2=r*r;
+    for (let y=0;y<dim;y++) for (let x=0;x<dim;x++) {
+      const dx=x-r, dy=y-r;
+      if (dx*dx+dy*dy<=r2) dt[(y*dim+x)*4+3]=255;
+    }
+  }
+  cx.putImageData(img,0,0); SE.set(r,oc); return oc;
+}
+
+// ═══════════════════════════════════════════════
+//  LAYERS
+// ═══════════════════════════════════════════════
+function addLayer(name, color) {
+  const cv = document.createElement('canvas');
+  cv.width=CW; cv.height=CH; cv.className='lc';
+  const ctx = cv.getContext('2d'); ctx.imageSmoothingEnabled=false;
+  const layer = { id:(Date.now()*1e3+Math.random()*1e3)|0, name, canvas:cv, ctx, opacity:1, color:color||'#000000', visible:true };
+  layers.push(layer); activeIdx=layers.length-1;
+  document.getElementById('paper').appendChild(cv); return layer;
+}
+
+function recolorLayer(layer, hex) {
+  const id=layer.ctx.getImageData(0,0,CW,CH), d=id.data;
+  const r=parseInt(hex.slice(1,3),16), g=parseInt(hex.slice(3,5),16), b=parseInt(hex.slice(5,7),16);
+  for (let i=0;i<d.length;i+=4) if(d[i+3]>0){d[i]=r;d[i+1]=g;d[i+2]=b;}
+  layer.ctx.putImageData(id,0,0); layer.color=hex; SC.clear(); updateThumbs();
+}
+
+function updateThumbs() {
+  layers.forEach(l=>{
+    const el=document.getElementById('th-'+l.id); if(!el) return;
+    const ctx=el.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,36,36); ctx.drawImage(l.canvas,0,0,36,36);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW ENGINE
+// ═══════════════════════════════════════════════
+function calcR(pressure) {
+  if (eraserOn) return dToR(eSize);
+  if (!bPressure) return dToR(bSize);
+  const p = Math.max(0, Math.min(1, pressure || 0));
+  if (p < bThresh) return -1;   // below threshold → skip but don't cancel stroke
+  const norm = (p - bThresh) / (1 - bThresh + 1e-9);
+  const d = bMin + (bSize - bMin) * Math.pow(norm, bCurve);
+  return dToR(Math.max(bMin, d));
+}
+
+function setGCO(ctx, erase) {
+  const op = erase ? 'destination-out' : 'source-over';
+  if (_op !== op) { ctx.globalCompositeOperation = op; _op = op; }
+}
+
+function doDot(ctx, x, y, r, hex, erase) {
+  setGCO(ctx, erase);
+  const st = erase ? mkES(r) : mkDS(r, hex);
+  ctx.drawImage(st, Math.round(x)-r, Math.round(y)-r);
+}
+
+function doLine(ctx, x0,y0, x1,y1, r, hex, erase) {
+  setGCO(ctx, erase);
+  const st = erase ? mkES(r) : mkDS(r, hex);
+  const dx=x1-x0, dy=y1-y0, dist=Math.sqrt(dx*dx+dy*dy);
+  const step = Math.max(1, r===0 ? 1 : Math.floor(r*0.5));
+  const n = Math.max(1, Math.ceil(dist/step));
+  for (let i=0;i<=n;i++) {
+    const t=i/n;
+    ctx.drawImage(st, Math.round(x0+dx*t)-r, Math.round(y0+dy*t)-r);
+  }
+}
+
+function s2c(sx,sy) { return { x:(sx-view.x)/view.scale, y:(sy-view.y)/view.scale }; }
+
+// These three called only from pen pointer handlers
+function beginStroke(sx,sy,pressure) {
+  const l=layers[activeIdx]; if(!l||!l.visible) return;
+  _op='';
+  const r=calcR(pressure), pt=s2c(sx,sy);
+  if (r>=0) doDot(l.ctx, pt.x,pt.y, r, l.color, eraserOn);
+  lastPt=pt;
+}
+
+function continueStroke(sx,sy,pressure) {
+  const l=layers[activeIdx]; if(!l||!l.visible) return;
+  const r=calcR(pressure), pt=s2c(sx,sy);
+  if (r>=0) {
+    if (lastPt) doLine(l.ctx, lastPt.x,lastPt.y, pt.x,pt.y, r, l.color, eraserOn);
+    else        doDot(l.ctx, pt.x,pt.y, r, l.color, eraserOn);
+  }
+  lastPt=pt;
+}
+
+function finishStroke() {
+  lastPt=null; _op='';
+  updateThumbs(); pushHistory();
+}
+
+// ═══════════════════════════════════════════════
+//  UNDO / REDO
+// ═══════════════════════════════════════════════
+function pushHistory() {
+  if (histIdx<history.length-1) history.length=histIdx+1;
+  const snap=layers.map(l=>({
+    url:l.canvas.toDataURL('image/png'),
+    opacity:l.opacity, color:l.color, name:l.name, visible:l.visible
+  }));
+  history.push(snap);
+  if (history.length>MAX_UNDO+1) history.shift(); else histIdx++;
+}
+
+function restoreSnap(snap) {
+  snap.forEach((s,i)=>{
+    if(!layers[i]) return;
+    const img=new Image();
+    img.onload=()=>{
+      const ctx=layers[i].ctx;
+      ctx.globalCompositeOperation='source-over'; _op='';
+      ctx.clearRect(0,0,CW,CH); ctx.drawImage(img,0,0);
+      layers[i].opacity=s.opacity; layers[i].canvas.style.opacity=s.opacity;
+      layers[i].color=s.color; layers[i].name=s.name;
+      layers[i].visible=s.visible; layers[i].canvas.style.display=s.visible?'':'none';
+    };
+    img.src=s.url;
+  });
+  setTimeout(()=>{ updateThumbs(); renderLayers(); }, 80);
+}
+
+function undo() { if(histIdx<=0){showToast('これ以上元に戻せません');return;} histIdx--; restoreSnap(history[histIdx]); showToast('元に戻す'); }
+function redo() { if(histIdx>=history.length-1){showToast('やり直しはありません');return;} histIdx++; restoreSnap(history[histIdx]); showToast('やり直し'); }
+
+// ═══════════════════════════════════════════════
+//  VIEW
+// ═══════════════════════════════════════════════
+function fitView() {
+  const sw=window.innerWidth, sh=window.innerHeight;
+  view.scale=Math.min(sw/CW,sh/CH)*0.88;
+  view.x=(sw-CW*view.scale)/2; view.y=(sh-CH*view.scale)/2;
+  applyView();
+}
+function applyView() {
+  document.getElementById('cw').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.scale})`;
+  document.getElementById('zl').textContent=Math.round(view.scale*100)+'%';
+}
+
+// ═══════════════════════════════════════════════
+//  PEN CURSOR RING
+// ═══════════════════════════════════════════════
+const prc = document.getElementById('prc');
+function updPRC(x,y,pressure) {
+  prc.style.display='block'; prc.style.left=x+'px'; prc.style.top=y+'px';
+  const r=calcR(pressure||0.5);
+  const sz=Math.max(4, (r<0?1:r)*2*view.scale);
+  prc.style.width=sz+'px'; prc.style.height=sz+'px';
+  prc.style.borderColor=eraserOn?'rgba(248,113,113,.75)':'rgba(255,255,255,.7)';
+}
+
+// ═══════════════════════════════════════════════
+//  CANVAS POINTER EVENTS
+//  Pen and touch are handled in completely separate paths.
+//  Pen gets exclusive capture → zero cancellation.
+// ═══════════════════════════════════════════════
+const ca = document.getElementById('ca');
+ca.addEventListener('contextmenu', e=>e.preventDefault());
+
+// ── PEN handlers (registered directly on canvas with capture) ──
+ca.addEventListener('pointerdown', function(e) {
+  if (e.pointerType !== 'pen') return;   // touch handled separately below
+  e.preventDefault(); e.stopImmediatePropagation();
+
+  // If there's already an active pen stroke (shouldn't happen, but be safe)
+  if (penActive && penPtrId !== null && penPtrId !== e.pointerId) return;
+
+  try { ca.setPointerCapture(e.pointerId); } catch(_){}
+  penActive = true; penPtrId = e.pointerId;
+
+  updPRC(e.clientX, e.clientY, e.pressure);
+  beginStroke(e.clientX, e.clientY, e.pressure);
+}, {passive:false, capture:true});
+
+ca.addEventListener('pointermove', function(e) {
+  if (e.pointerType !== 'pen') return;
+  if (!penActive || e.pointerId !== penPtrId) return;
+  e.preventDefault();
+
+  updPRC(e.clientX, e.clientY, e.pressure);
+
+  // Use coalesced events for maximum smoothness
+  const evs = (e.getCoalescedEvents && e.getCoalescedEvents().length > 0)
+    ? e.getCoalescedEvents() : [e];
+  for (const ev of evs) continueStroke(ev.clientX, ev.clientY, ev.pressure);
+}, {passive:false});
+
+ca.addEventListener('pointerup', function(e) {
+  if (e.pointerType !== 'pen') return;
+  if (e.pointerId !== penPtrId) return;
+  e.preventDefault();
+  prc.style.display='none';
+  penActive=false; penPtrId=null;
+  finishStroke();
+}, {passive:false});
+
+ca.addEventListener('pointercancel', function(e) {
+  if (e.pointerType !== 'pen') return;
+  if (e.pointerId !== penPtrId) return;
+  // pointercancel should NOT cancel the stroke — commit what we have
+  prc.style.display='none';
+  penActive=false; penPtrId=null;
+  finishStroke();
+}, {passive:false});
+
+// If pen loses capture for any reason, still finish stroke
+ca.addEventListener('lostpointercapture', function(e) {
+  if (!penActive) return;
+  if (e.pointerId !== penPtrId) return;
+  prc.style.display='none';
+  penActive=false; penPtrId=null;
+  finishStroke();
+}, {passive:false});
+
+// ── TOUCH handlers (pan / pinch / tap-for-undo only) ──
+// Touch never reaches draw engine — completely separate path
+function touchPtrs() { return [...ptrs.values()].filter(p=>p.type==='touch'); }
+
+ca.addEventListener('pointerdown', function(e) {
+  if (e.pointerType !== 'touch') return;
+  if (penActive) { e.preventDefault(); return; }  // pen is active → eat all touch
+  e.preventDefault();
+  ptrs.set(e.pointerId, {x:e.clientX,y:e.clientY,type:'touch',sx:e.clientX,sy:e.clientY,t:Date.now()});
+  const tp=touchPtrs(); maxTC=Math.max(maxTC,tp.length); touchMoved=false;
+  if (tp.length===1) { panBase={px:e.clientX,py:e.clientY,vx:view.x,vy:view.y}; pinchBase=null; }
+  else if (tp.length===2) {
+    const[a,b]=tp;
+    pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};
+    panBase=null;
+  }
+}, {passive:false});
+
+ca.addEventListener('pointermove', function(e) {
+  if (e.pointerType !== 'touch') return;
+  if (penActive) { e.preventDefault(); return; }
+  e.preventDefault();
+  const prev=ptrs.get(e.pointerId); if(!prev) return;
+  ptrs.set(e.pointerId,{...prev,x:e.clientX,y:e.clientY});
+  const tp=touchPtrs();
+  if (Math.abs(e.clientX-prev.sx)>4||Math.abs(e.clientY-prev.sy)>4) touchMoved=true;
+  if (tp.length===1&&panBase) {
+    view.x=panBase.vx+(e.clientX-panBase.px);
+    view.y=panBase.vy+(e.clientY-panBase.py);
+    applyView();
+  } else if (tp.length===2&&pinchBase) {
+    const[a,b]=tp, dist=Math.hypot(b.x-a.x,b.y-a.y);
+    const ns=Math.max(0.04,Math.min(14,pinchBase.scale*dist/pinchBase.dist)), f=ns/pinchBase.scale;
+    view.scale=ns; view.x=pinchBase.mx-(pinchBase.mx-pinchBase.vx)*f; view.y=pinchBase.my-(pinchBase.my-pinchBase.vy)*f;
+    applyView();
+  }
+}, {passive:false});
+
+ca.addEventListener('pointerup', function(e) {
+  if (e.pointerType !== 'touch') return;
+  e.preventDefault();
+  const p=ptrs.get(e.pointerId); ptrs.delete(e.pointerId);
+  const elapsed=p?Date.now()-p.t:999, moved=p?Math.hypot(e.clientX-p.sx,e.clientY-p.sy):999;
+  const tap=!touchMoved&&elapsed<300&&moved<16;
+  const tp=touchPtrs();
+  if (tp.length===0) {
+    if (tap&&!penActive) { if(maxTC>=3) redo(); else if(maxTC===2) undo(); }
+    maxTC=0; touchMoved=false; panBase=null; pinchBase=null;
+  } else if (tp.length===1) {
+    const[rem]=tp; panBase={px:rem.x,py:rem.y,vx:view.x,vy:view.y}; pinchBase=null;
+  }
+}, {passive:false});
+
+ca.addEventListener('pointercancel', function(e) {
+  if (e.pointerType !== 'touch') return;
+  ptrs.delete(e.pointerId);
+  if (touchPtrs().length===0) { maxTC=0; touchMoved=false; panBase=null; pinchBase=null; }
+}, {passive:false});
+
+// Close panels when tapping canvas
+ca.addEventListener('pointerdown', function(e) {
+  if (e.pointerType==='pen') return;
+  if (openPanel) closePanel();
+  document.getElementById('sz-panel').classList.remove('open');
+  document.getElementById('sv-panel').classList.remove('open');
+}, {passive:true});
+
+// ═══════════════════════════════════════════════
+//  ERASER TOGGLE BUTTON
+// ═══════════════════════════════════════════════
+const erb = document.getElementById('erb');
+let erbY = 0, erbDragStartY = 0, erbDragStartBY = 0;
+let erbPointerDown = false, erbDragged = false;
+
+function initErbY() { erbY=window.innerHeight/2; erb.style.top=erbY+'px'; }
+
+function setEraserOn(v) {
+  eraserOn = v;
+  erb.classList.toggle('on', v);
+  const badge = document.getElementById('mode-badge');
+  badge.classList.toggle('show', v);
+}
+
+erb.addEventListener('pointerdown', function(e) {
+  e.preventDefault(); e.stopPropagation();
+  try { erb.setPointerCapture(e.pointerId); } catch(_){}
+  erbPointerDown=true; erbDragged=false;
+  erbDragStartY=e.clientY; erbDragStartBY=erbY;
+}, {passive:false});
+
+erb.addEventListener('pointermove', function(e) {
+  if (!erbPointerDown) return;
+  e.preventDefault();
+  const dy=e.clientY-erbDragStartY;
+  if (!erbLocked && Math.abs(dy)>6) {
+    erbDragged=true;
+    erbY=Math.max(38, Math.min(window.innerHeight-38, erbDragStartBY+dy));
+    erb.style.top=erbY+'px';
+  }
+}, {passive:false});
+
+erb.addEventListener('pointerup', function(e) {
+  if (!erbPointerDown) return;
+  e.preventDefault(); e.stopPropagation();
+  erbPointerDown=false;
+  if (!erbDragged) {
+    // It was a tap → toggle eraser
+    setEraserOn(!eraserOn);
+    showToast(eraserOn ? '消しゴム ON' : 'ペン モード');
+  }
+  erbDragged=false;
+}, {passive:false});
+
+erb.addEventListener('pointercancel', function(e) {
+  erbPointerDown=false; erbDragged=false;
+}, {passive:false});
+
+// Eraser lock button
+document.getElementById('lock-btn').addEventListener('pointerdown', e=>{
+  e.preventDefault(); e.stopPropagation();
+  erbLocked=!erbLocked;
+  const btn=document.getElementById('lock-btn');
+  btn.textContent=erbLocked?'🔒 ロック中':'🔓 移動可能';
+  btn.classList.toggle('unlocked',!erbLocked);
+  erb.classList.toggle('draggable',!erbLocked);
+});
+
+// ═══════════════════════════════════════════════
+//  BACKGROUND COLOR
+// ═══════════════════════════════════════════════
+const bgInput  = document.getElementById('bg-input');
+const bgSwatch = document.getElementById('bg-swatch');
+
+function applyBgColor(hex) {
+  bgColor=hex;
+  bgSwatch.style.background=hex;
+  bgSwatch.style.border = hex==='#ffffff'?'1.5px solid rgba(0,0,0,.2)':'none';
+  document.getElementById('paper').style.background=hex;
+}
+applyBgColor('#ffffff');
+
+bgInput.addEventListener('input',  e=>applyBgColor(e.target.value));
+bgInput.addEventListener('change', e=>applyBgColor(e.target.value));
+
+// ═══════════════════════════════════════════════
+//  FULLSCREEN
+// ═══════════════════════════════════════════════
+document.getElementById('fs-btn').addEventListener('click', function() {
+  if (!document.fullscreenElement) {
+    (document.documentElement.requestFullscreen
+      ? document.documentElement.requestFullscreen({navigationUI:'hide'})
+      : Promise.reject()
+    ).catch(()=>showToast('Safariのホーム画面に追加でフルスクリーン'));
+  } else {
+    document.exitFullscreen && document.exitFullscreen();
+  }
+});
+document.addEventListener('fullscreenchange',()=>{
+  document.getElementById('fs-btn').textContent=document.fullscreenElement?'✕⛶':'⛶';
+});
+
+// ═══════════════════════════════════════════════
+//  PANELS
+// ═══════════════════════════════════════════════
+const PANELS={brush:'br-panel',eraser:'er-panel',layers:'ly-panel'};
+const TABS  ={brush:'tab-br',  eraser:'tab-er',  layers:'tab-ly'};
+
+function openPanelFn(id) {
+  if (openPanel===id){closePanel();return;}
+  closePanel(false); openPanel=id;
+  document.getElementById(PANELS[id]).classList.add('open');
+  document.getElementById(TABS[id]).classList.add('act');
+  document.getElementById('rtabs').classList.add('shifted');
+  if(id==='layers') renderLayers();
+}
+function closePanel(reset=true) {
+  Object.values(PANELS).forEach(p=>document.getElementById(p).classList.remove('open'));
+  Object.values(TABS).forEach(t=>document.getElementById(t).classList.remove('act'));
+  document.getElementById('rtabs').classList.remove('shifted');
+  if(reset) openPanel=null;
+}
+
+['br','er','ly'].forEach(k=>{
+  const map={br:'brush',er:'eraser',ly:'layers'};
+  document.getElementById('tab-'+k).addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();openPanelFn(map[k]);});
+});
+
+// ═══════════════════════════════════════════════
+//  LAYER UI
+// ═══════════════════════════════════════════════
+function renderLayers() {
+  const list=document.getElementById('llist'); list.innerHTML='';
+  [...layers].reverse().forEach((layer,ri)=>{
+    const i=layers.length-1-ri;
+    const item=document.createElement('div'); item.className='li'+(i===activeIdx?' act':'');
+    const tw=document.createElement('div'); tw.className='lthumb';
+    const tc=document.createElement('canvas'); tc.id='th-'+layer.id; tc.width=36; tc.height=36;
+    const tctx=tc.getContext('2d'); tctx.fillStyle='#fff'; tctx.fillRect(0,0,36,36); tctx.drawImage(layer.canvas,0,0,36,36);
+    tw.appendChild(tc);
+    const info=document.createElement('div'); info.className='linfo';
+    const nm=document.createElement('div'); nm.className='lname'; nm.textContent=layer.name;
+    const opr=document.createElement('div'); opr.className='loprow';
+    const osl=document.createElement('input'); osl.type='range'; osl.min=0; osl.max=100; osl.value=Math.round(layer.opacity*100); osl.style.flex='1';
+    const oval=document.createElement('span'); oval.textContent=Math.round(layer.opacity*100)+'%';
+    osl.addEventListener('input',ev=>{layer.opacity=ev.target.value/100;layer.canvas.style.opacity=layer.opacity;oval.textContent=ev.target.value+'%';updST(osl);});
+    updST(osl); opr.appendChild(osl); opr.appendChild(oval); info.appendChild(nm); info.appendChild(opr);
+    const cd=document.createElement('div'); cd.className='lcd'; cd.style.background=layer.color;
+    const ci=document.createElement('input'); ci.type='color'; ci.value=layer.color;
+    ci.addEventListener('input',ev=>{cd.style.background=ev.target.value;recolorLayer(layer,ev.target.value);});
+    ci.addEventListener('change',()=>pushHistory());
+    cd.appendChild(ci);
+    const vb=document.createElement('button'); vb.className='lvis'; vb.textContent=layer.visible?'👁':'—';
+    vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;layer.canvas.style.display=layer.visible?'':'none';vb.textContent=layer.visible?'👁':'—';});
+    const db=document.createElement('button'); db.className='ldel'; db.textContent='✕';
+    db.addEventListener('pointerdown',e=>{
+      e.stopPropagation();
+      if(layers.length<=1){showToast('レイヤーは最低1枚必要');return;}
+      layer.canvas.remove(); layers.splice(i,1); activeIdx=Math.min(activeIdx,layers.length-1);
+      pushHistory(); renderLayers();
+    });
+    item.appendChild(tw); item.appendChild(info); item.appendChild(cd); item.appendChild(vb); item.appendChild(db);
+    item.addEventListener('pointerdown',e=>{if(e.target===ci||e.target===cd||e.target===vb||e.target===db)return;activeIdx=i;renderLayers();});
+    list.appendChild(item);
+  });
+}
+
+document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
+  e.preventDefault(); e.stopPropagation();
+  addLayer('レイヤー '+(layers.length+1),'#000000'); pushHistory(); renderLayers();
+});
+
+// ═══════════════════════════════════════════════
+//  CANVAS SIZE
+// ═══════════════════════════════════════════════
+const szBtn=document.getElementById('sz-btn'), szPanel=document.getElementById('sz-panel'), szConfirm=document.getElementById('sz-confirm');
+szBtn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();szPanel.classList.toggle('open');szConfirm.style.display='none';pendingSize=null;});
+document.querySelectorAll('.sz-opt').forEach(opt=>{
+  opt.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    const w=+opt.dataset.w,h=+opt.dataset.h;
+    if(w===CW&&h===CH){showToast('現在と同じサイズです');return;}
+    pendingSize={w,h};
+    document.querySelectorAll('.sz-opt').forEach(o=>o.classList.remove('cur')); opt.classList.add('cur');
+    szConfirm.style.display='block';
+  });
+});
+szConfirm.addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  if(!pendingSize)return;
+  const{w,h}=pendingSize; CW=w; CH=h;
+  const paper=document.getElementById('paper');
+  paper.style.width=CW+'px'; paper.style.height=CH+'px'; paper.style.background=bgColor;
+  layers.forEach(l=>{l.canvas.width=CW;l.canvas.height=CH;l.ctx.imageSmoothingEnabled=false;});
+  SC.clear();SE.clear();history=[];histIdx=-1;pushHistory();fitView();renderLayers();
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;
+  szPanel.classList.remove('open'); showToast(`${CW}×${CH} に変更`);
+});
+
+// ═══════════════════════════════════════════════
+//  SAVE / EXPORT
+// ═══════════════════════════════════════════════
+const svBtn=document.getElementById('sv-btn'), svPanel=document.getElementById('sv-panel');
+svBtn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();svPanel.classList.toggle('open');});
+
+document.getElementById('sv-go').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  const base=(document.getElementById('sv-name').value.trim()||'untitled').replace(/[\\/:*?"<>|]/g,'_');
+  layers.forEach((layer,i)=>{
+    const tmp=document.createElement('canvas'); tmp.width=CW; tmp.height=CH;
+    const tctx=tmp.getContext('2d');
+    tctx.fillStyle='#ffffff'; tctx.fillRect(0,0,CW,CH);
+    const src=layer.ctx.getImageData(0,0,CW,CH);
+    const dst=tctx.createImageData(CW,CH);
+    const sd=src.data,dd=dst.data;
+    for(let j=0;j<sd.length;j+=4){const v=sd[j+3]>127?0:255;dd[j]=dd[j+1]=dd[j+2]=v;dd[j+3]=255;}
+    tctx.putImageData(dst,0,0);
+    const fn=layers.length===1?base:base+'_layer'+(i+1);
+    // Delay each download slightly so browser doesn't block them
+    setTimeout(()=>{
+      const a=document.createElement('a');
+      a.href=tmp.toDataURL('image/png');
+      a.download=fn+'.png';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }, i*220);
+  });
+  showToast(layers.length===1?'PNG をダウンロード':layers.length+'枚のPNGをダウンロード');
+  svPanel.classList.remove('open');
+});
+
+// close top panels on outside tap
+document.addEventListener('pointerdown',e=>{
+  if(!szPanel.contains(e.target)&&e.target!==szBtn) szPanel.classList.remove('open');
+  if(!svPanel.contains(e.target)&&e.target!==svBtn) svPanel.classList.remove('open');
+},{passive:true,capture:false});
+
+// ═══════════════════════════════════════════════
+//  BRUSH UI  (sliders)
+// ═══════════════════════════════════════════════
+function updST(el){ if(!el)return; el.style.setProperty('--pct',((el.value-el.min)/(el.max-el.min)*100).toFixed(1)+'%'); }
+function mkSl(id,cb){ const el=document.getElementById(id); el.addEventListener('input',e=>{updST(el);cb(+e.target.value);}); updST(el); }
+
+mkSl('sl-sz',  v=>{bSize=v;  document.getElementById('v-sz').textContent=v+'px';  drawCurve();});
+mkSl('sl-msz', v=>{bMin=v;   document.getElementById('v-msz').textContent=v+'px'; drawCurve();});
+mkSl('sl-thr', v=>{bThresh=v/100; document.getElementById('v-thr').textContent=v+'%'; drawCurve();});
+mkSl('sl-cv',  v=>{bCurve=v/100;  document.getElementById('v-cv').textContent=(v/100).toFixed(2); drawCurve();});
+mkSl('sl-esz', v=>{eSize=v;  document.getElementById('v-esz').textContent=v+'px';});
+
+document.getElementById('cb-pr').addEventListener('change',e=>{
+  bPressure=e.target.checked;
+  document.getElementById('pr-sec').style.opacity=bPressure?'1':'0.4';
+  drawCurve();
+});
+
+// ═══════════════════════════════════════════════
+//  PRESSURE CURVE VISUAL
+// ═══════════════════════════════════════════════
+function drawCurve(){
+  const cv=document.getElementById('curve-cv'); if(!cv)return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H); ctx.fillStyle='rgba(0,0,0,.4)'; ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle='rgba(255,255,255,.07)'; ctx.lineWidth=1;
+  for(let i=1;i<4;i++){
+    ctx.beginPath();ctx.moveTo(W*i/4,0);ctx.lineTo(W*i/4,H);ctx.stroke();
+    ctx.beginPath();ctx.moveTo(0,H*i/4);ctx.lineTo(W,H*i/4);ctx.stroke();
+  }
+  if(bPressure&&bThresh>0){
+    ctx.strokeStyle='rgba(248,113,113,.5)';ctx.setLineDash([3,3]);
+    ctx.beginPath();ctx.moveTo(W*bThresh,0);ctx.lineTo(W*bThresh,H);ctx.stroke();ctx.setLineDash([]);
+  }
+  ctx.strokeStyle=bPressure?'#5b9cf6':'rgba(255,255,255,.25)';ctx.lineWidth=2;ctx.beginPath();
+  for(let px=0;px<=W;px++){
+    const p=px/W; let sz;
+    if(!bPressure) sz=bSize;
+    else if(p<bThresh) sz=0;
+    else { const n=(p-bThresh)/(1-bThresh+1e-9); sz=bMin+(bSize-bMin)*Math.pow(n,bCurve); }
+    const py=H-Math.max(0,Math.min(1,bSize>0?sz/bSize:0))*H;
+    px===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,.28)';ctx.font='9px "DM Mono",monospace';
+  ctx.fillText('筆圧 →',3,H-3);ctx.fillText('↑ px',2,9);
+}
+
+// ═══════════════════════════════════════════════
+//  TOAST
+// ═══════════════════════════════════════════════
+let ttmr;
+function showToast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(ttmr); ttmr=setTimeout(()=>t.classList.remove('show'),1600);
+}
+
+// ═══════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════
+(function init(){
+  const paper=document.getElementById('paper');
+  paper.style.width=CW+'px'; paper.style.height=CH+'px'; paper.style.background=bgColor;
+  addLayer('レイヤー 1','#000000');
+  fitView(); pushHistory(); drawCurve(); initErbY();
+  window.addEventListener('resize',()=>{ fitView(); initErbY(); });
+})();
+</script>
+</body>
+</html>
