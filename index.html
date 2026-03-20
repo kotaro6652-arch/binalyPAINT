@@ -285,25 +285,25 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
     </div>
   </div>
 
-  <!-- Marker panel -->
+  <!-- Marker panel — full pen equivalent, independent settings, pressure default off -->
   <div class="rpanel" id="mk-panel">
     <div class="ph">マーカー設定</div>
     <div class="pb">
-      <div style="font-size:10px;color:var(--aqua);padding:6px 8px;background:rgba(56,217,217,.07);border-radius:6px;border:1px solid rgba(56,217,217,.2);margin-bottom:10px;line-height:1.6">太くて均一なマーカー風設定。<br>エンジンはペンと同じ2値描画。</div>
       <div class="slabel">サイズ（直径 px）</div>
-      <div class="row"><label>最大</label><div class="csl" id="csl-mk-sz" data-min="1" data-max="200" data-ratio="5"></div><span class="val" id="v-mk-sz">20px</span></div>
-      <div class="row"><label>最小</label><div class="csl" id="csl-mk-msz" data-min="1" data-max="100" data-ratio="5"></div><span class="val" id="v-mk-msz">10px</span></div>
+      <div class="row"><label>最大</label><div class="csl" id="csl-mk-sz" data-min="1" data-max="200" data-ratio="5"></div><span class="val" id="v-mk-sz">12px</span></div>
+      <div class="row"><label>最小</label><div class="csl" id="csl-mk-msz" data-min="1" data-max="100" data-ratio="5"></div><span class="val" id="v-mk-msz">1px</span></div>
       <div class="slabel">手振れ補正</div>
       <canvas class="stab-cv" id="mk-stab-cv" width="244" height="36"></canvas>
-      <div class="row"><label>強さ</label><div class="csl" id="csl-mk-stab" data-min="1" data-max="20" data-ratio="3"></div><span class="val" id="v-mk-stab">3</span></div>
+      <div class="row"><label>強さ</label><div class="csl" id="csl-mk-stab" data-min="1" data-max="20" data-ratio="3"></div><span class="val" id="v-mk-stab">1</span></div>
       <div class="slabel">筆圧</div>
       <div class="togrow"><span class="lbl">筆圧感知</span>
-        <label class="tog"><input type="checkbox" id="cb-mk-pr" checked><div class="ttr"></div><div class="tth"></div></label></div>
-      <div id="mk-pr-sec">
-        <div class="row"><label>閾値</label><div class="csl" id="csl-mk-thr" data-min="0" data-max="30" data-ratio="8"></div><span class="val" id="v-mk-thr">1%</span></div>
+        <label class="tog"><input type="checkbox" id="cb-mk-pr"><div class="ttr"></div><div class="tth"></div></label></div>
+      <div id="mk-pr-sec" style="opacity:.4">
+        <div class="row"><label>閾値</label><div class="csl" id="csl-mk-thr" data-min="0" data-max="30" data-ratio="8"></div><span class="val" id="v-mk-thr">3%</span></div>
+        <div style="font-size:10px;color:var(--tx2);margin-bottom:8px;line-height:1.65;padding:7px 9px;background:var(--sf2);border-radius:7px;border:1px solid var(--bd)">カーブ大→極細〜太い　カーブ小→すぐ太くなる<br><span style="color:var(--grn)">— 緑線 = 最小サイズの床</span></div>
         <div class="slabel">筆圧カーブ</div>
         <canvas class="curve-cv" id="mk-curve-cv" width="244" height="72"></canvas>
-        <div class="row"><label>カーブ</label><input type="range" class="native" id="sl-mk-cv" min="10" max="400" value="80"><span class="val" id="v-mk-cv">0.80</span></div>
+        <div class="row"><label>カーブ</label><input type="range" class="native" id="sl-mk-cv" min="10" max="400" value="200"><span class="val" id="v-mk-cv">2.00</span></div>
       </div>
     </div>
   </div>
@@ -358,18 +358,57 @@ let view={x:0,y:0,scale:1};
 let penId=null,lastDrawPt=null,_op='';
 let eraserOn=false,erbMode='toggle',erbLocked=true;
 let bgColor='#ffffff';
-
-// ── Tool system ──────────────────────────────
-const TOOLS={
-  pen: {sz:12,min:1,pressure:true,curve:2.0,thresh:0.03,stab:1},
-  marker:{sz:20,min:10,pressure:true,curve:0.8,thresh:0.01,stab:3}
-};
-let activeTool='pen';
+// Brush globals (shared between pen and marker tools)
 let bSize=12,bMin=1,bPressure=true,bCurve=2.0,bThresh=0.03,stabLen=1,eSize=20;
 
-function saveToolState(){if(TOOLS[activeTool])TOOLS[activeTool]={sz:bSize,min:bMin,pressure:bPressure,curve:bCurve,thresh:bThresh,stab:stabLen};}
-function loadToolState(n){const t=TOOLS[n];if(!t)return;bSize=t.sz;bMin=t.min;bPressure=t.pressure;bCurve=t.curve;bThresh=t.thresh;stabLen=t.stab;}
-function switchTool(n){saveToolState();activeTool=n;loadToolState(n);}
+// ── Tool system ──────────────────────────────
+// Each tool has fully independent settings.
+// Switching saves current globals → old tool, loads new tool → globals.
+const TOOLS={
+  pen:   {sz:12,min:1,pressure:true, curve:2.0,thresh:0.03,stab:1},
+  marker:{sz:12,min:1,pressure:false,curve:2.0,thresh:0.03,stab:1}
+};
+let activeTool='pen';
+let markerPressure=false; // unused now (kept for compat)
+
+function saveToolState(){
+  const t=TOOLS[activeTool];
+  t.sz=bSize;t.min=bMin;t.pressure=bPressure;t.curve=bCurve;t.thresh=bThresh;t.stab=stabLen;
+}
+function loadToolState(name){
+  const t=TOOLS[name];
+  bSize=t.sz;bMin=t.min;bPressure=t.pressure;bCurve=t.curve;bThresh=t.thresh;stabLen=t.stab;
+}
+function switchTool(name){
+  if(name===activeTool)return;
+  saveToolState();
+  activeTool=name;
+  loadToolState(name);
+  // Sync UI for the newly active tool
+  if(name==='marker'){
+    document.getElementById('v-mk-sz').textContent=bSize+'px';
+    document.getElementById('v-mk-msz').textContent=bMin+'px';
+    document.getElementById('v-mk-stab').textContent=stabLen;
+    document.getElementById('v-mk-thr').textContent=Math.round(bThresh*100)+'%';
+    document.getElementById('cb-mk-pr').checked=bPressure;
+    document.getElementById('mk-pr-sec').style.opacity=bPressure?'1':'0.4';
+    const slMk=document.getElementById('sl-mk-cv');slMk.value=Math.round(bCurve*100);updRF(slMk);
+    document.getElementById('v-mk-cv').textContent=bCurve.toFixed(2);
+    drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);
+    drawStabOn('mk-stab-cv',stabLen);
+  }else{
+    document.getElementById('v-sz').textContent=bSize+'px';
+    document.getElementById('v-msz').textContent=bMin+'px';
+    document.getElementById('v-stab').textContent=stabLen;
+    document.getElementById('v-thr').textContent=Math.round(bThresh*100)+'%';
+    document.getElementById('cb-pr').checked=bPressure;
+    document.getElementById('pr-sec').style.opacity=bPressure?'1':'0.4';
+    const slP=document.getElementById('sl-cv');slP.value=Math.round(bCurve*100);updRF(slP);
+    document.getElementById('v-cv').textContent=bCurve.toFixed(2);
+    drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);
+    drawStabOn('stab-cv',stabLen);
+  }
+}
 
 // ── History (100ms debounce for precision) ───
 let hist=[],histIdx=-1,_ht=null;
@@ -447,35 +486,41 @@ function doLine(ctx,x0,y0,x1,y1,d,hex,e){
   const step=Math.max(1,d<=2?1:Math.floor(d*.45)),n=Math.max(1,Math.ceil(dist/step));
   for(let i=0;i<=n;i++){const t=i/n;ctx.drawImage(st,(x0+dx*t+.5|0)-h,(y0+dy*t+.5|0)-h);}
 }
-function s2c(sx,sy){return{x:(sx-view.x)/view.scale,y:(sy-view.y)/view.scale};}
-function c2s(cx,cy){return{x:cx*view.scale+view.x,y:cy*view.scale+view.y};}
+// (s2c/c2s are defined below as screenToCanvas/canvasToScreen with flip support)
 function beginStroke(sx,sy,f){
   const l=layers[activeIdx];if(!l||!l.visible)return;
-  _op='';stabClear();const pt=s2c(sx,sy),sp=stabAdd(pt),d=calcD(f,true);
+  _op='';stabClear();const pt=screenToCanvas(sx,sy),sp=stabAdd(pt),d=calcD(f,true);
   if(d>0)doDot(l.ctx,sp.x,sp.y,d,l.color,eraserOn);lastDrawPt=sp;
 }
 function continueStroke(sx,sy,f){
   const l=layers[activeIdx];if(!l||!l.visible)return;
-  const pt=s2c(sx,sy),sp=stabAdd(pt),d=calcD(f,false);
+  const pt=screenToCanvas(sx,sy),sp=stabAdd(pt),d=calcD(f,false);
   if(d>0){if(lastDrawPt)doLine(l.ctx,lastDrawPt.x,lastDrawPt.y,sp.x,sp.y,d,l.color,eraserOn);else doDot(l.ctx,sp.x,sp.y,d,l.color,eraserOn);lastDrawPt=sp;}else lastDrawPt=sp;
 }
 function finishDraw(sx,sy,f){
   const l=layers[activeIdx];
-  if(l&&l.visible&&sx!=null)stabFlush(l.ctx,s2c(sx,sy),eraserOn?Math.max(1,eSize|0):Math.max(1,bMin|0),l.color,eraserOn);
+  if(l&&l.visible&&sx!=null)stabFlush(l.ctx,screenToCanvas(sx,sy),eraserOn?Math.max(1,eSize|0):Math.max(1,bMin|0),l.color,eraserOn);
   lastDrawPt=null;stabClear();_op='';
 }
 
 // ══════════════════════════════════════════════
 //  TRIANGLE TEXTURE MAPPING (mesh warp)
+//  Each triangle is expanded by SEAM_PX pixels to prevent
+//  sub-pixel gaps. This guarantees minimum 1px coverage.
 // ══════════════════════════════════════════════
-function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
+const SEAM_PX=0.8; // expansion amount in destination pixels
+function drawTriTexExpanded(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
+  // Expand triangle outward from its centroid by SEAM_PX
+  const gcx=(x0+x1+x2)/3,gcy=(y0+y1+y2)/3;
+  function exp(x,y){const dx=x-gcx,dy=y-gcy,d=Math.hypot(dx,dy)||1;return[x+dx/d*SEAM_PX,y+dy/d*SEAM_PX];}
+  const[ex0,ey0]=exp(x0,y0),[ex1,ey1]=exp(x1,y1),[ex2,ey2]=exp(x2,y2);
   const du1=u1-u0,du2=u2-u0,dv1=v1-v0,dv2=v2-v0,det=du1*dv2-du2*dv1;
   if(Math.abs(det)<0.0001)return;
-  const dx1=x1-x0,dx2=x2-x0,dy1=y1-y0,dy2=y2-y0;
+  const dx1=ex1-ex0,dx2=ex2-ex0,dy1=ey1-ey0,dy2=ey2-ey0;
   const a=(dx1*dv2-dx2*dv1)/det,b=(dy1*dv2-dy2*dv1)/det;
   const cc=(du1*dx2-du2*dx1)/det,d=(du1*dy2-du2*dy1)/det;
-  const e=x0-a*u0-cc*v0,ff=y0-b*u0-d*v0;
-  ctx.save();ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.lineTo(x2,y2);ctx.closePath();ctx.clip();
+  const e=ex0-a*u0-cc*v0,ff=ey0-b*u0-d*v0;
+  ctx.save();ctx.beginPath();ctx.moveTo(ex0,ey0);ctx.lineTo(ex1,ey1);ctx.lineTo(ex2,ey2);ctx.closePath();ctx.clip();
   ctx.transform(a,b,cc,d,e,ff);ctx.drawImage(src,0,0,srcW,srcH);ctx.restore();
 }
 function drawMeshWarp(ctx,src,srcW,srcH,coordFn){
@@ -483,8 +528,8 @@ function drawMeshWarp(ctx,src,srcW,srcH,coordFn){
   for(let row=0;row<4;row++)for(let col=0;col<4;col++){
     const p00=coordFn(row,col),p10=coordFn(row,col+1),p01=coordFn(row+1,col),p11=coordFn(row+1,col+1);
     const u0=col*cw,u1=(col+1)*cw,v0=row*ch,v1=(row+1)*ch;
-    drawTriTex(ctx,src,srcW,srcH,p00.x,p00.y,p10.x,p10.y,p01.x,p01.y,u0,v0,u1,v0,u0,v1);
-    drawTriTex(ctx,src,srcW,srcH,p10.x,p10.y,p11.x,p11.y,p01.x,p01.y,u1,v0,u1,v1,u0,v1);
+    drawTriTexExpanded(ctx,src,srcW,srcH,p00.x,p00.y,p10.x,p10.y,p01.x,p01.y,u0,v0,u1,v0,u0,v1);
+    drawTriTexExpanded(ctx,src,srcW,srcH,p10.x,p10.y,p11.x,p11.y,p01.x,p01.y,u1,v0,u1,v1,u0,v1);
   }
 }
 
@@ -504,11 +549,11 @@ function meshPtW(r,c){
   const cos=Math.cos(rot),sin=Math.sin(rot);
   return{x:cos*lx-sin*ly+cx+meshPts[r][c].dx,y:sin*lx+cos*ly+cy+meshPts[r][c].dy};
 }
-function meshPtS(r,c){const p=meshPtW(r,c);return c2s(p.x,p.y);}
+function meshPtS(r,c){const p=meshPtW(r,c);return canvasToScreen(p.x,p.y);}
 function getHandles(){
   if(!selTx||!selBBox)return{};
   const{cx,cy,rot,sx,sy}=selTx,hw=selBBox.w*sx/2,hh=selBBox.h*sy/2,cos=Math.cos(rot),sin=Math.sin(rot);
-  const rp=(lx,ly)=>c2s(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
   return{TL:rp(-hw,-hh),TC:rp(0,-hh),TR:rp(hw,-hh),ML:rp(-hw,0),MR:rp(hw,0),
     BL:rp(-hw,hh),BC:rp(0,hh),BR:rp(hw,hh),ROT:rp(0,-hh-44/view.scale)};
 }
@@ -517,11 +562,11 @@ function hitHandle(sx,sy){
   const H=getHandles(),R=24;
   for(const[n,p]of Object.entries(H)){const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'h:'+n;}
   if(meshPts)for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){const sp=meshPtS(r,c),dx=sx-sp.x,dy=sy-sp.y;if(dx*dx+dy*dy<R*R)return`m:${r}:${c}`;}
-  if(selTx&&selBBox){const p=s2c(sx,sy),{cx,cy,rot,sx:ssx,sy:ssy}=selTx;const cos=Math.cos(-rot),sin=Math.sin(-rot),lx=cos*(p.x-cx)-sin*(p.y-cy),ly=sin*(p.x-cx)+cos*(p.y-cy);if(Math.abs(lx)<selBBox.w*ssx/2&&Math.abs(ly)<selBBox.h*ssy/2)return'h:MOVE';}
+  if(selTx&&selBBox){const p=screenToCanvas(sx,sy),{cx,cy,rot,sx:ssx,sy:ssy}=selTx;const cos=Math.cos(-rot),sin=Math.sin(-rot),lx=cos*(p.x-cx)-sin*(p.y-cy),ly=sin*(p.x-cx)+cos*(p.y-cy);if(Math.abs(lx)<selBBox.w*ssx/2&&Math.abs(ly)<selBBox.h*ssy/2)return'h:MOVE';}
   return null;
 }
 function applyHandle(h,psx,psy,csx,csy){
-  const pC=s2c(psx,psy),cC=s2c(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
+  const pC=screenToCanvas(psx,psy),cC=screenToCanvas(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
   if(h==='h:MOVE'){selTx.cx+=dx;selTx.cy+=dy;}
   else if(h==='h:ROT')selTx.rot+=Math.atan2(cC.y-selTx.cy,cC.x-selTx.cx)-Math.atan2(pC.y-selTx.cy,pC.x-selTx.cx);
   else if(/^h:(TL|TR|BL|BR)$/.test(h)){const pd=Math.hypot(pC.x-selTx.cx,pC.y-selTx.cy),cd=Math.hypot(cC.x-selTx.cx,cC.y-selTx.cy);if(pd>1){const sc=cd/pd;selTx.sx*=sc;selTx.sy*=sc;}}
@@ -572,10 +617,10 @@ function drawSelOv(){
   sovCtx.clearRect(0,0,selOv.width,selOv.height);
   if(selState==='lasso'&&lassoPath.length>1){
     sovCtx.save();sovCtx.strokeStyle='rgba(91,156,246,.9)';sovCtx.lineWidth=2;sovCtx.setLineDash([5,4]);
-    sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=c2s(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();
+    sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();
   }
   if(selState==='transform'&&selImg&&selBBox&&selTx){
-    if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=c2s(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
+    if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
     drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
     const H=getHandles(),corners=[H.TL,H.TR,H.BR,H.BL];
     sovCtx.save();sovCtx.strokeStyle='rgba(249,115,22,.8)';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);
@@ -620,40 +665,45 @@ function getTabAtPoint(x,y){
   return TAB_MAP.hasOwnProperty(tab.id)?tab.id:null;
 }
 
-// Check if pen is over an open panel or top UI element
-function isPenOnUI(x,y){
-  const el=document.elementFromPoint(x,y);if(!el)return false;
-  if(el.closest('.rpanel.open'))return true;
-  if(el.closest('.toppanel.open'))return true;
-  if(el.closest('#bg-wrap,#sz-btn,#sv-btn,#open-btn'))return true;
-  if(y<52)return true;
-  return false;
+// Returns 'panel' | 'ui' | 'canvas' for where the pen landed
+function classifyPenTarget(x,y){
+  const el=document.elementFromPoint(x,y);if(!el)return'canvas';
+  // Inside an already-open side panel → let native controls work, don't draw, don't close
+  if(el.closest('.rpanel.open'))return'panel';
+  // Inside an already-open top panel → same
+  if(el.closest('.toppanel.open'))return'panel';
+  // Top bar buttons (but not the full top area — don't block canvas near top)
+  if(el.closest('#bg-wrap,#sz-btn,#sv-btn,#open-btn'))return'ui';
+  return'canvas';
 }
 
 document.addEventListener('touchstart',function(e){
   const st=getStylusT(e.changedTouches);if(!st)return;
 
-  // ── ★ Tab check FIRST ★ ──────────────────────────────────
-  // This must happen before any other logic because document capture
-  // fires before element-level handlers — the only reliable place.
+  // ── ★ Tab check FIRST (must be in document capture) ★ ──
   const tabId=getTabAtPoint(st.clientX,st.clientY);
   if(tabId!==null){
     e.preventDefault();
     const panelName=TAB_MAP[tabId];
     if(panelName)openPanelFn(panelName);
-    return; // don't draw
+    return;
   }
-  // ────────────────────────────────────────────────────────────
 
-  // If over open panel or top UI, block drawing but don't preventDefault
-  // so native controls (color picker, range) still work
-  if(isPenOnUI(st.clientX,st.clientY)){
+  const target=classifyPenTarget(st.clientX,st.clientY);
+
+  if(target==='panel'){
+    // Pen is inside an open panel — let native controls handle it, keep panel open
+    return; // no preventDefault, no draw, no close
+  }
+  if(target==='ui'){
+    // Pen hit a top bar button — close panels, don't draw
     closePanel();
     document.getElementById('sz-panel').classList.remove('open');
     document.getElementById('sv-panel').classList.remove('open');
     return;
   }
 
+  // target === 'canvas' — draw
   e.preventDefault();
   if(openPanel){closePanel();}
   document.getElementById('sz-panel').classList.remove('open');
@@ -662,7 +712,7 @@ document.addEventListener('touchstart',function(e){
   if(penId!==null&&penId!==st.identifier){finishDraw(st.clientX,st.clientY,st.force);setTimeout(deferHist,0);penId=null;}
   penId=st.identifier;
 
-  if(selState==='lasso'){lassoPath.push(s2c(st.clientX,st.clientY));drawSelOv();return;}
+  if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
   if(selState==='transform'){const h=hitHandle(st.clientX,st.clientY);if(h){selHandle=h;selPrevPt={x:st.clientX,y:st.clientY};return;}}
   updPRC(st.clientX,st.clientY,st.force);beginStroke(st.clientX,st.clientY,st.force);
 },{passive:false,capture:true});
@@ -671,7 +721,7 @@ document.addEventListener('touchmove',function(e){
   if(penId===null)return;
   let st=null;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===penId&&isStylusT(t)){st=t;break;}}
   if(!st)return;e.preventDefault();
-  if(selState==='lasso'){const pt=s2c(st.clientX,st.clientY),last=lassoPath[lassoPath.length-1];if(!last||Math.hypot(pt.x-last.x,pt.y-last.y)>2){lassoPath.push(pt);drawSelOv();}return;}
+  if(selState==='lasso'){const pt=screenToCanvas(st.clientX,st.clientY),last=lassoPath[lassoPath.length-1];if(!last||Math.hypot(pt.x-last.x,pt.y-last.y)>2){lassoPath.push(pt);drawSelOv();}return;}
   if(selState==='transform'&&selHandle){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);selPrevPt={x:st.clientX,y:st.clientY};return;}
   updPRC(st.clientX,st.clientY,st.force);
   const evs=e.getCoalescedTouches?e.getCoalescedTouches(st):[];
@@ -756,6 +806,20 @@ document.addEventListener('touchcancel',function(e){
 // ══════════════════════════════════════════════
 //  LEFT BUTTONS (all draggable circles)
 // ══════════════════════════════════════════════
+// ── Flip state + coord helpers ─────────────────────────────
+let flipState=false;
+// Flip-aware s2c/c2s: when flipped, mirror screen x around canvas visual center
+function screenToCanvas(sx,sy){
+  let fx=sx;
+  if(flipState){const vcx=view.x+CW*view.scale/2;fx=2*vcx-sx;}
+  return{x:(fx-view.x)/view.scale,y:(sy-view.y)/view.scale};
+}
+function canvasToScreen(cx,cy){
+  const sp={x:cx*view.scale+view.x,y:cy*view.scale+view.y};
+  if(flipState){const vcx=view.x+CW*view.scale/2;sp.x=2*vcx-sp.x;}
+  return sp;
+}
+
 function makeDraggableBtn(el,initYFn,onTap){
   let BY=0,PD=false,Mov=false,SY=0,BaseY=0,DwnT=0;
   initYFn(y=>{BY=y;el.style.top=BY+'px';});
@@ -765,15 +829,15 @@ function makeDraggableBtn(el,initYFn,onTap){
   el.addEventListener('touchcancel',function(){PD=false;Mov=false;},{passive:false});
 }
 
-// Flip button
+// Flip button — CSS display only, no undo
 makeDraggableBtn(document.getElementById('flip-btn'),
   cb=>cb(window.innerHeight*.35),
   ()=>{
-    layers.forEach(l=>{
-      const tmp=new OffscreenCanvas(CW,CH),ctx=tmp.getContext('2d');
-      ctx.translate(CW,0);ctx.scale(-1,1);ctx.drawImage(l.canvas,0,0);
-      l.ctx.globalCompositeOperation='source-over';_op='source-over';l.ctx.clearRect(0,0,CW,CH);l.ctx.drawImage(tmp,0,0);
-    });updateThumbs();captureNow();showToast('左右反転しました');
+    flipState=!flipState;
+    applyView(); // reapply with flip
+    const btn=document.getElementById('flip-btn');
+    btn.style.background=flipState?'rgba(56,217,217,.35)':'rgba(56,217,217,.15)';
+    showToast(flipState?'表示を左右反転中':'反転解除');
   }
 );
 
@@ -834,7 +898,18 @@ function updateThumbs(){
     const ctx=el.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,34,34);ctx.drawImage(l.canvas,0,0,34,34);});
 }
 function fitView(){const sw=window.innerWidth,sh=window.innerHeight;view.scale=Math.min(sw/CW,sh/CH)*.88;view.x=(sw-CW*view.scale)/2;view.y=(sh-CH*view.scale)/2;applyView();}
-function applyView(){document.getElementById('cw').style.transform=`translate(${view.x}px,${view.y}px) scale(${view.scale})`;document.getElementById('zl').textContent=Math.round(view.scale*100)+'%';}
+function applyView(){
+  const cw=document.getElementById('cw');
+  const{x,y,scale}=view;
+  if(flipState){
+    // Mirror around canvas center within view
+    const cx=CW/2,cy=CH/2;
+    cw.style.transform=`translate(${x}px,${y}px) scale(${scale}) translate(${cx}px,${cy}px) scaleX(-1) translate(${-cx}px,${-cy}px)`;
+  }else{
+    cw.style.transform=`translate(${x}px,${y}px) scale(${scale})`;
+  }
+  document.getElementById('zl').textContent=Math.round(scale*100)+'%';
+}
 
 // ── Layer UI ─────────────────────────────────
 function renderLayers(){
@@ -1086,28 +1161,35 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
   fitView();captureNow();initTabDotY();
 
   // Pen sliders
-  initCsl('csl-sz',  12,v=>{bSize=v;document.getElementById('v-sz').textContent=v+'px';SC.clear();drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);TOOLS.pen.sz=v;});
-  initCsl('csl-msz',  1,v=>{bMin=v;document.getElementById('v-msz').textContent=v+'px';drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);TOOLS.pen.min=v;});
-  initCsl('csl-thr',  3,v=>{bThresh=v/100;document.getElementById('v-thr').textContent=v+'%';drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);TOOLS.pen.thresh=v/100;});
-  initCsl('csl-stab', 1,v=>{stabLen=v;document.getElementById('v-stab').textContent=v;drawStabOn('stab-cv',v);TOOLS.pen.stab=v;});
+  initCsl('csl-sz',  12,v=>{bSize=v;document.getElementById('v-sz').textContent=v+'px';SC.clear();if(activeTool==='pen'){TOOLS.pen.sz=v;drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-msz',  1,v=>{bMin=v;document.getElementById('v-msz').textContent=v+'px';if(activeTool==='pen'){TOOLS.pen.min=v;drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-thr',  3,v=>{bThresh=v/100;document.getElementById('v-thr').textContent=v+'%';if(activeTool==='pen'){TOOLS.pen.thresh=v/100;drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-stab', 1,v=>{stabLen=v;document.getElementById('v-stab').textContent=v;if(activeTool==='pen'){TOOLS.pen.stab=v;drawStabOn('stab-cv',v);}});
   initCsl('csl-esz', 20,v=>{eSize=v;document.getElementById('v-esz').textContent=v+'px';});
   const slCv=document.getElementById('sl-cv');updRF(slCv);
-  slCv.addEventListener('input',function(){bCurve=this.value/100;document.getElementById('v-cv').textContent=bCurve.toFixed(2);updRF(this);drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);TOOLS.pen.curve=bCurve;});
-  document.getElementById('cb-pr').addEventListener('change',e=>{bPressure=e.target.checked;document.getElementById('pr-sec').style.opacity=bPressure?'1':'0.4';drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);TOOLS.pen.pressure=bPressure;});
+  slCv.addEventListener('input',function(){bCurve=this.value/100;document.getElementById('v-cv').textContent=bCurve.toFixed(2);updRF(this);if(activeTool==='pen'){TOOLS.pen.curve=bCurve;drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  document.getElementById('cb-pr').addEventListener('change',e=>{
+    bPressure=e.target.checked;TOOLS.pen.pressure=bPressure;
+    document.getElementById('pr-sec').style.opacity=bPressure?'1':'0.4';
+    drawCurveOn('curve-cv',bSize,bMin,bPressure,bCurve,bThresh);
+  });
 
-  // Marker sliders
-  const mk=TOOLS.marker;
-  initCsl('csl-mk-sz', 20,v=>{TOOLS.marker.sz=v;document.getElementById('v-mk-sz').textContent=v+'px';if(activeTool==='marker'){bSize=v;SC.clear();}drawCurveOn('mk-curve-cv',TOOLS.marker.sz,TOOLS.marker.min,TOOLS.marker.pressure,TOOLS.marker.curve,TOOLS.marker.thresh);});
-  initCsl('csl-mk-msz',10,v=>{TOOLS.marker.min=v;document.getElementById('v-mk-msz').textContent=v+'px';if(activeTool==='marker')bMin=v;drawCurveOn('mk-curve-cv',TOOLS.marker.sz,TOOLS.marker.min,TOOLS.marker.pressure,TOOLS.marker.curve,TOOLS.marker.thresh);});
-  initCsl('csl-mk-thr', 1,v=>{TOOLS.marker.thresh=v/100;document.getElementById('v-mk-thr').textContent=v+'%';if(activeTool==='marker')bThresh=v/100;drawCurveOn('mk-curve-cv',TOOLS.marker.sz,TOOLS.marker.min,TOOLS.marker.pressure,TOOLS.marker.curve,TOOLS.marker.thresh);});
-  initCsl('csl-mk-stab',3,v=>{TOOLS.marker.stab=v;document.getElementById('v-mk-stab').textContent=v;if(activeTool==='marker')stabLen=v;drawStabOn('mk-stab-cv',v);});
+  // Marker sliders (independent settings stored in TOOLS.marker)
+  initCsl('csl-mk-sz',  12,v=>{TOOLS.marker.sz=v;document.getElementById('v-mk-sz').textContent=v+'px';if(activeTool==='marker'){bSize=v;SC.clear();drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-mk-msz',  1,v=>{TOOLS.marker.min=v;document.getElementById('v-mk-msz').textContent=v+'px';if(activeTool==='marker'){bMin=v;drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-mk-thr',  3,v=>{TOOLS.marker.thresh=v/100;document.getElementById('v-mk-thr').textContent=v+'%';if(activeTool==='marker'){bThresh=v/100;drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  initCsl('csl-mk-stab', 1,v=>{TOOLS.marker.stab=v;document.getElementById('v-mk-stab').textContent=v;if(activeTool==='marker'){stabLen=v;drawStabOn('mk-stab-cv',v);}});
   const slMkCv=document.getElementById('sl-mk-cv');updRF(slMkCv);
-  slMkCv.addEventListener('input',function(){const cv=this.value/100;TOOLS.marker.curve=cv;document.getElementById('v-mk-cv').textContent=cv.toFixed(2);updRF(this);if(activeTool==='marker')bCurve=cv;drawCurveOn('mk-curve-cv',TOOLS.marker.sz,TOOLS.marker.min,TOOLS.marker.pressure,TOOLS.marker.curve,TOOLS.marker.thresh);});
-  document.getElementById('cb-mk-pr').addEventListener('change',e=>{TOOLS.marker.pressure=e.target.checked;document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';if(activeTool==='marker')bPressure=e.target.checked;drawCurveOn('mk-curve-cv',TOOLS.marker.sz,TOOLS.marker.min,TOOLS.marker.pressure,TOOLS.marker.curve,TOOLS.marker.thresh);});
+  slMkCv.addEventListener('input',function(){const cv=this.value/100;TOOLS.marker.curve=cv;document.getElementById('v-mk-cv').textContent=cv.toFixed(2);updRF(this);if(activeTool==='marker'){bCurve=cv;drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}});
+  document.getElementById('cb-mk-pr').addEventListener('change',e=>{
+    TOOLS.marker.pressure=e.target.checked;
+    document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';
+    if(activeTool==='marker'){bPressure=e.target.checked;drawCurveOn('mk-curve-cv',bSize,bMin,bPressure,bCurve,bThresh);}
+  });
 
   drawCurveOn('curve-cv',12,1,true,2.0,0.03);
-  drawCurveOn('mk-curve-cv',20,10,true,0.8,0.01);
-  drawStabOn('stab-cv',1);drawStabOn('mk-stab-cv',3);
+  drawCurveOn('mk-curve-cv',12,1,false,2.0,0.03);
+  drawStabOn('stab-cv',1);drawStabOn('mk-stab-cv',1);
   window.addEventListener('resize',()=>{fitView();resizeSelOv();});
 })();
 </script>
