@@ -553,65 +553,106 @@ window.addEventListener('pointercancel',function(e){
 },{passive:false,capture:true});
 
 // ── Finger touch for pan/pinch/undo/redo ──────────────────────────────────
+let gestureStart=0;
+
+function hasStylusTouches(list){
+  for(let i=0;i<list.length;i++){if(isStylusTouch(list[i]))return true;}
+  return false;
+}
+
+// Rebuild pinch or pan state from current fingerTouches (called on finger count change)
+function rebuildNavState(){
+  const fp=[...fingerTouches.values()];
+  if(fp.length===0){
+    panBase=null;pinchBase=null;
+  } else if(fp.length===1){
+    // Seamless transition from pinch (or fresh pan): anchor at current finger + current view
+    panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};
+    pinchBase=null;
+  } else if(fp.length>=2){
+    const[a,b]=fp;
+    pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};
+    panBase=null;
+  }
+}
+
 document.addEventListener('touchstart',function(e){
-  // Skip if any touch is stylus
-  let hasStylus=false;
-  for(let i=0;i<e.touches.length;i++){if(isStylusTouch(e.touches[i]))hasStylus=true;}
-  if(hasStylus)return;
+  if(hasStylusTouches(e.touches))return;
   e.preventDefault();
+  const prevCount=fingerTouches.size;
   for(let i=0;i<e.changedTouches.length;i++){
     const t=e.changedTouches[i];
     fingerTouches.set(t.identifier,{x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t:Date.now()});
   }
   const fp=[...fingerTouches.values()];
-  maxFC=Math.max(maxFC,fp.length);fingerMoved=false;
-  if(fp.length===1){panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;}
-  else if(fp.length===2){
-    const[a,b]=fp;
-    pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};
-    panBase=null;
-  }
+  maxFC=Math.max(maxFC,fp.length);
+  // Reset moved flag only when a fresh gesture starts (no fingers were down before)
+  if(prevCount===0){fingerMoved=false;gestureStart=Date.now();}
+  // Always rebuild nav state when finger count changes
+  rebuildNavState();
 },{passive:false,capture:false});
 
 document.addEventListener('touchmove',function(e){
-  let hasStylus=false;
-  for(let i=0;i<e.touches.length;i++){if(isStylusTouch(e.touches[i]))hasStylus=true;}
-  if(hasStylus)return;
+  if(hasStylusTouches(e.touches))return;
   e.preventDefault();
   for(let i=0;i<e.changedTouches.length;i++){
     const t=e.changedTouches[i];
     const prev=fingerTouches.get(t.identifier);if(!prev)continue;
-    if(Math.abs(t.clientX-prev.sx)>4||Math.abs(t.clientY-prev.sy)>4)fingerMoved=true;
+    if(Math.abs(t.clientX-prev.sx)>6||Math.abs(t.clientY-prev.sy)>6)fingerMoved=true;
     fingerTouches.set(t.identifier,{...prev,x:t.clientX,y:t.clientY});
   }
   const fp=[...fingerTouches.values()];
-  if(fp.length===1&&panBase){view.x=panBase.vx+(fp[0].x-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();}
-  else if(fp.length===2&&pinchBase){
-    const[a,b]=fp,dist=Math.hypot(b.x-a.x,b.y-a.y);
-    const ns=Math.max(.04,Math.min(14,pinchBase.scale*dist/pinchBase.dist)),f=ns/pinchBase.scale;
-    view.scale=ns;view.x=pinchBase.mx-(pinchBase.mx-pinchBase.vx)*f;view.y=pinchBase.my-(pinchBase.my-pinchBase.vy)*f;applyView();
+  if(fp.length===1&&panBase){
+    view.x=panBase.vx+(fp[0].x-panBase.px);
+    view.y=panBase.vy+(fp[0].y-panBase.py);
+    applyView();
+  } else if(fp.length>=2&&pinchBase){
+    const[a,b]=fp;
+    const dist=Math.hypot(b.x-a.x,b.y-a.y);
+    const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;   // current midpoint
+
+    // Scale: ratio of current dist to initial dist
+    const ns=Math.max(.04,Math.min(14,pinchBase.scale*dist/pinchBase.dist));
+    const f=ns/pinchBase.scale;
+
+    // Apply scale around the initial midpoint, then add midpoint translation
+    // This gives simultaneous pinch + pan in one gesture
+    view.scale=ns;
+    view.x=(pinchBase.vx - pinchBase.mx)*f + mx;
+    view.y=(pinchBase.vy - pinchBase.my)*f + my;
+    applyView();
   }
 },{passive:false,capture:false});
 
 document.addEventListener('touchend',function(e){
-  let hasStylus=false;
-  for(let i=0;i<e.touches.length;i++){if(isStylusTouch(e.touches[i]))hasStylus=true;}
-  if(hasStylus)return;
-  for(let i=0;i<e.changedTouches.length;i++)fingerTouches.delete(e.changedTouches[i].identifier);
-  const fp=[...fingerTouches.values()];
-  const t=e.changedTouches[0];
-  const p=t?fingerTouches.get(t.identifier):null;
-  // Undo/redo detection
+  if(hasStylusTouches(e.touches))return;
+  // ── FIX: save info BEFORE deleting so tap detection has the timestamp ──
+  const savedInfos=[];
+  for(let i=0;i<e.changedTouches.length;i++){
+    const t=e.changedTouches[i];
+    savedInfos.push(fingerTouches.get(t.identifier)); // save first
+    fingerTouches.delete(t.identifier);               // then delete
+  }
+  const fp=[...fingerTouches.values()]; // remaining active fingers
   if(fp.length===0){
-    const elapsed=p?Date.now()-p.t:999;
-    if(!fingerMoved&&elapsed<300){if(maxFC>=3)redo();else if(maxFC===2)undo();}
-    maxFC=0;fingerMoved=false;panBase=null;pinchBase=null;
-  } else if(fp.length===1){panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;}
+    // All fingers lifted — tap detection for undo/redo
+    const elapsed=Date.now()-gestureStart;
+    if(!fingerMoved&&elapsed<350){
+      if(maxFC>=3)redo();
+      else if(maxFC===2)undo();
+    }
+    maxFC=0;fingerMoved=false;gestureStart=0;
+    panBase=null;pinchBase=null;
+  } else {
+    // Fingers still down — seamlessly rebuild nav state
+    // This handles pinch→pan (2→1) without lifting all fingers
+    rebuildNavState();
+  }
 },{passive:false,capture:false});
 
 document.addEventListener('touchcancel',function(e){
   for(let i=0;i<e.changedTouches.length;i++)fingerTouches.delete(e.changedTouches[i].identifier);
-  if(fingerTouches.size===0){maxFC=0;fingerMoved=false;panBase=null;pinchBase=null;}
+  if(fingerTouches.size===0){maxFC=0;fingerMoved=false;gestureStart=0;panBase=null;pinchBase=null;}
 },{passive:false,capture:false});
 
 // ── Layers ────────────────────────────────────────────────────────────────
