@@ -279,7 +279,9 @@ function stabAdd(pt){
 function calcD(f,isFirst){
   if(eraserOn)return Math.max(1,eSize|0);if(!bPressure)return Math.max(1,bSize|0);
   const p=Math.max(0,Math.min(1,f||0));
-  if(isFirst&&p===0)return Math.max(1,bMin|0);if(p<bThresh)return 0;
+  if(isFirst&&p===0)return Math.max(1,bMin|0);
+  // Below threshold: always draw minimum 1px so lines never break
+  if(p<bThresh)return 1;
   return Math.max(bMin,Math.min(bSize,Math.round(bMin+(bSize-bMin)*Math.pow((p-bThresh)/(1-bThresh+1e-9),bCurve))))|0;
 }
 
@@ -335,10 +337,12 @@ uniform bool u_first;
 uniform vec3 u_bg;
 out vec4 o;
 void main(){
-  vec2 uv=vec2(v_uv.x,1.-v_uv.y);
+  // v_uv.y=1 = screen top. Brush uses -clip.y so FBO/texture y=1 = canvas top.
+  // No Y-flip needed here.
+  vec2 uv=v_uv;
   vec4 L=texture(u_layer,uv);
   L.a*=u_opacity;
-  vec3 base=u_first?u_bg:texture(u_base,v_uv).rgb;
+  vec3 base=u_first?u_bg:texture(u_base,uv).rgb;
   vec3 rgb;
   if(u_blend==1){rgb=mix(base,base*L.rgb,L.a);}
   else if(u_blend==2){vec3 ov=mix(2.*base*L.rgb,1.-2.*(1.-base)*(1.-L.rgb),step(.5,base));rgb=mix(base,ov,L.a);}
@@ -400,6 +404,7 @@ function initWebGL(){
   const qb2=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb2);gl.bufferData(gl.ARRAY_BUFFER,qverts,gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);gl.bindVertexArray(null);
   for(let i=0;i<2;i++){compTex[i]=makeTexture(CW,CH,null);compFBO[i]=makeFBO(compTex[i]);}
+  bgCompTex=makeTexture(CW,CH,null);bgCompFBO=makeFBO(bgCompTex);
   return true;
 }
 function makeTexture(w,h,data){
@@ -441,17 +446,31 @@ function queueDot(x,y,d){
 }
 function queueLine(x0,y0,x1,y1,d){
   const dx=x1-x0,dy=y1-y0,dist=Math.sqrt(dx*dx+dy*dy);
-  const step=Math.max(1,d<=2?1:Math.floor(d*.45)),n=Math.max(1,Math.ceil(dist/step));
-  for(let i=0;i<=n;i++){const t=i/n;queueDot(x0+dx*t,y0+dy*t,d);}
+  if(dist===0)return;
+  // Step = d/2 (radius). Guarantees ≥50% circle overlap at ALL angles.
+  // For d=1: step=0.5px → 2 stamps/px. Eliminates gaps at vertical/diagonal.
+  // For d=4: step=2px → efficient. WebGL instancing cost is negligible.
+  const step=Math.max(0.5,d/2);
+  const n=Math.ceil(dist/step);
+  for(let i=1;i<=n;i++){const t=i/n;queueDot(x0+dx*t,y0+dy*t,d);}
 }
 
-let drawScheduled=false;
 function scheduleDraw(){if(!drawScheduled){drawScheduled=true;requestAnimationFrame(compositeAndDisplay);}}
-function compositeAndDisplay(){
-  drawScheduled=false;if(!gl)return;
+// Mark bg dirty (non-active layer changed, layer order changed, active layer switched, bg color changed)
+function markBgDirty(){bgCompDirty=true;scheduleDraw();}
+
+let drawScheduled=false;
+// Pre-composited "background" texture (all layers except active, updated when not drawing)
+let bgCompTex=null,bgCompFBO=null;
+let bgCompDirty=true; // needs rebuild when layers change or non-active layer edits
+
+function rebuildBgComp(){
+  // Composite all layers EXCEPT the active one into bgCompTex
+  if(!bgCompTex){bgCompTex=makeTexture(CW,CH,null);bgCompFBO=makeFBO(bgCompTex);}
   gl.disable(gl.BLEND);
   let first=true,src=compRead,dst=compWrite;
   for(let i=0;i<gLayers.length;i++){
+    if(i===gActiveIdx)continue; // skip active layer
     const l=gLayers[i];if(!l.visible)continue;
     gl.bindFramebuffer(gl.FRAMEBUFFER,compFBO[dst]);gl.viewport(0,0,CW,CH);
     gl.useProgram(PROG.comp);
@@ -464,17 +483,58 @@ function compositeAndDisplay(){
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);[src,dst]=[dst,src];first=false;
   }
+  // If no other visible layers, fill with background
   if(first){
     gl.bindFramebuffer(gl.FRAMEBUFFER,compFBO[dst]);gl.viewport(0,0,CW,CH);
     gl.clearColor(bgRGB[0],bgRGB[1],bgRGB[2],1);gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);[src,dst]=[dst,src];
   }
+  // Copy result to bgCompTex
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,compFBO[src]);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,bgCompFBO);
+  gl.blitFramebuffer(0,0,CW,CH,0,0,CW,CH,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+  compRead=src;compWrite=dst;
+  bgCompDirty=false;
+}
+
+function compositeAndDisplay(){
+  drawScheduled=false;if(!gl)return;
+
+  // If bg needs full rebuild (layer order changed, non-active layer edited, etc.)
+  if(bgCompDirty)rebuildBgComp();
+
+  // Fast path: composite bgComp + active layer → screen
+  // This is only 1 composite pass instead of N, crucial for real-time stroke speed
+  const l=gLayers[gActiveIdx];
+  let finalTex;
+  if(l&&l.visible){
+    // Blend active layer over bgComp into a composite FBO
+    const dst=compWrite;
+    gl.bindFramebuffer(gl.FRAMEBUFFER,compFBO[dst]);gl.viewport(0,0,CW,CH);
+    gl.disable(gl.BLEND);
+    gl.useProgram(PROG.comp);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,bgCompTex);gl.uniform1i(ul(PROG.comp,'u_base'),0);
+    gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_layer'),1);
+    gl.uniform1f(ul(PROG.comp,'u_opacity'),l.opacity);
+    gl.uniform1i(ul(PROG.comp,'u_blend'),{normal:0,multiply:1,overlay:2}[l.blend]||0);
+    gl.uniform1i(ul(PROG.comp,'u_first'),0);
+    gl.uniform3f(ul(PROG.comp,'u_bg'),bgRGB[0],bgRGB[1],bgRGB[2]);
+    gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    finalTex=compTex[dst];
+    // Update ping-pong pointers
+    const tmp=compRead;compRead=compWrite;compWrite=tmp;
+  }else{
+    finalTex=bgCompTex;
+  }
+
+  // Blit finalTex → screen
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,CW,CH);
   gl.useProgram(PROG.blit);
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,compTex[src]);gl.uniform1i(ul(PROG.blit,'u_tex'),0);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,finalTex);gl.uniform1i(ul(PROG.blit,'u_tex'),0);
   gl.uniform1i(ul(PROG.blit,'u_flip'),flipState?1:0);
   gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
-  compRead=src;compWrite=dst;
 }
 
 // ── Draw API ───────────────────────────────────────────
@@ -483,9 +543,13 @@ function beginStroke(sx,sy,f){
   if(d>0){queueDot(pt.x,pt.y,d);flushBrush();}lastDrawPt=pt;
 }
 function continueStroke(sx,sy,f){
-  const pt=screenToCanvas(sx,sy),d=calcD(f,false);
-  if(d>0){if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,pt.x,pt.y,d);else queueDot(pt.x,pt.y,d);lastDrawPt=pt;}
-  else lastDrawPt=stabAdd(pt);
+  const pt=stabAdd(screenToCanvas(sx,sy)),d=calcD(f,false);
+  if(d>0){
+    if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,pt.x,pt.y,d);
+    else queueDot(pt.x,pt.y,d);
+    lastDrawPt=pt;
+    flushBrush(); // flush every point for real-time preview
+  }else lastDrawPt=pt;
 }
 function finishStroke(sx,sy){
   if(instCount>0)flushBrush();lastDrawPt=null;stabClear();
@@ -504,39 +568,46 @@ function unpackAlpha(bits,color,w,h){
   for(let i=0;i<n;i++){const on=(bits[i>>3]>>(i&7))&1;rgba[i*4]=on?r:0;rgba[i*4+1]=on?g:0;rgba[i*4+2]=on?b:0;rgba[i*4+3]=on?255:0;}
   return rgba;
 }
+// ── Sync check with timeout (prevents infinite loop on 4x) ──
 function readLayerAsync(layer){
   return new Promise(resolve=>{
-    const pbo=gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER,CW*CH*4,gl.STREAM_READ);
+    // Synchronous readPixels fallback for large canvases to avoid PBO deadlock
+    const raw=new Uint8Array(CW*CH*4);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,layer.fbo);
-    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,0);
+    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
-    const sync=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);gl.flush();
-    function check(){
-      const res=gl.clientWaitSync(sync,0,0);
-      if(res===gl.TIMEOUT_EXPIRED){requestAnimationFrame(check);return;}
-      gl.deleteSync(sync);
-      const raw=new Uint8Array(CW*CH*4);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,raw);
-      gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);gl.deleteBuffer(pbo);
-      resolve({color:[...layer.color],alpha:packAlpha(raw),opacity:layer.opacity,blend:layer.blend,name:layer.name,visible:layer.visible});
-    }
-    requestAnimationFrame(check);
+    resolve({
+      color:[...layer.color],
+      alpha:packAlpha(raw),
+      opacity:layer.opacity,blend:layer.blend,
+      name:layer.name,visible:layer.visible
+    });
   });
 }
+
 async function captureNow(){
-  if(undoBusy)return;undoBusy=true;
+  // Don't capture while pen is down
+  if(penId!==null)return;
+  if(undoBusy)return;
+  undoBusy=true;
   document.getElementById('undo-busy').classList.add('show');
   try{
     if(histIdx<hist.length-1)hist.length=histIdx+1;
-    const snap=await Promise.all(gLayers.map(l=>readLayerAsync(l)));
+    // Sequential (not parallel) to avoid GPU memory pressure on large canvases
+    const snap=[];
+    for(const l of gLayers){
+      snap.push(await readLayerAsync(l));
+      // Yield to event loop between layers
+      await new Promise(r=>setTimeout(r,0));
+    }
     hist.push(snap);
     const mx=maxUndoCount();
     if(hist.length>mx+1)hist.shift();else histIdx++;
     updateThumbs();
-  }finally{undoBusy=false;document.getElementById('undo-busy').classList.remove('show');}
+  }finally{
+    undoBusy=false;
+    document.getElementById('undo-busy').classList.remove('show');
+  }
 }
 function deferCapture(){clearTimeout(deferCapture._t);deferCapture._t=setTimeout(captureNow,120);}
 deferCapture._t=null;
@@ -548,7 +619,7 @@ function restoreSnap(snap){
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);
   });
-  scheduleDraw();updateThumbs();renderLayers();
+  bgCompDirty=true;scheduleDraw();updateThumbs();renderLayers();
 }
 function undo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx<=0){showToast('これ以上元に戻せません');return;}histIdx--;restoreSnap(hist[histIdx]);showToast('元に戻す');}
 function redo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx>=hist.length-1){showToast('やり直しはありません');return;}histIdx++;restoreSnap(hist[histIdx]);showToast('やり直し');}
@@ -567,12 +638,12 @@ function recolorLayer(layer,hexColor){
   const[nr,ng,nb]=hexToRGB01(hexColor).map(v=>Math.round(v*255));
   for(let i=0;i<raw.length;i+=4)if(raw[i+3]>0){raw[i]=nr;raw[i+1]=ng;raw[i+2]=nb;}
   gl.bindTexture(gl.TEXTURE_2D,layer.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
-  layer.color=hexToRGB01(hexColor);scheduleDraw();
+  layer.color=hexToRGB01(hexColor);markBgDirty();
 }
 function moveLayer(from,to){
   if(to<0||to>=gLayers.length)return;
   const moved=gLayers.splice(from,1)[0];gLayers.splice(to,0,moved);
-  gActiveIdx=gLayers.indexOf(moved);scheduleDraw();captureNow();renderLayers();
+  gActiveIdx=gLayers.indexOf(moved);markBgDirty();captureNow();renderLayers();
 }
 function rgb01ToHex(c){return'#'+c.map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');}
 function updateThumbs(){
@@ -707,27 +778,42 @@ function execLasso(){
   const flippedBack=new Uint8Array(CW*CH*4);
   for(let row=0;row<CH;row++){const s=(CH-1-row)*CW*4;flippedBack.set(erased.data.subarray(s,s+CW*4),row*CW*4);}
   gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,flippedBack);
-  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
+  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');bgCompDirty=true;scheduleDraw();
 }
 function commitTransform(){
   if(!selImg||!selBBox||!selTx)return;
   const l=gLayers[gActiveIdx];if(!l)return;
-  const tc=document.createElement('canvas');tc.width=CW;tc.height=CH;const tctx=tc.getContext('2d');
-  drawMeshWarp(tctx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtW(r,c));
-  const id=tctx.getImageData(0,0,CW,CH);
+
+  // Step 1: render warped selection into a 2D canvas (world/canvas coords)
+  const warpCanvas=document.createElement('canvas');warpCanvas.width=CW;warpCanvas.height=CH;
+  const wctx=warpCanvas.getContext('2d');
+  drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtW(r,c));
+
+  // Step 2: read current layer FBO pixels (which already had selection erased in execLasso)
+  const raw=new Uint8Array(CW*CH*4);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+  gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+
+  // Step 3: put layer pixels onto a 2D canvas (flip Y: WebGL y=0=bottom → canvas y=0=top)
+  const layerCanvas=document.createElement('canvas');layerCanvas.width=CW;layerCanvas.height=CH;
+  const lctx=layerCanvas.getContext('2d');
+  const flipped=new Uint8Array(CW*CH*4);
+  for(let row=0;row<CH;row++){const s=(CH-1-row)*CW*4;flipped.set(raw.subarray(s,s+CW*4),row*CW*4);}
+  lctx.putImageData(new ImageData(new Uint8ClampedArray(flipped.buffer),CW,CH),0,0);
+
+  // Step 4: draw warped selection on top (source-over preserves alpha correctly)
+  lctx.drawImage(warpCanvas,0,0);
+
+  // Step 5: read merged result and flip Y back for WebGL upload
+  const merged=lctx.getImageData(0,0,CW,CH);
   const flippedBack=new Uint8Array(CW*CH*4);
-  for(let row=0;row<CH;row++){const s=(CH-1-row)*CW*4;flippedBack.set(id.data.subarray(s,s+CW*4),row*CW*4);}
-  const warpTex=makeTexture(CW,CH,flippedBack);
-  gl.bindFramebuffer(gl.FRAMEBUFFER,l.fbo);gl.viewport(0,0,CW,CH);
-  gl.enable(gl.BLEND);gl.blendFuncSeparate(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA,gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
-  gl.useProgram(PROG.comp);
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_base'),0);
-  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,warpTex);gl.uniform1i(ul(PROG.comp,'u_layer'),1);
-  gl.uniform1f(ul(PROG.comp,'u_opacity'),1);gl.uniform1i(ul(PROG.comp,'u_blend'),0);gl.uniform1i(ul(PROG.comp,'u_first'),0);gl.uniform3f(ul(PROG.comp,'u_bg'),0,0,0);
-  gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.deleteTexture(warpTex);
+  for(let row=0;row<CH;row++){const s=(CH-1-row)*CW*4;flippedBack.set(merged.data.subarray(s,s+CW*4),row*CW*4);}
+  gl.bindTexture(gl.TEXTURE_2D,l.tex);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,flippedBack);
+
   selState=null;selBBox=null;selImg=null;selMask=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
-  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();scheduleDraw();captureNow();showToast('変形確定');
+  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();markBgDirty();captureNow();showToast('変形確定');
 }
 function cancelSel(){
   selState=null;selBBox=null;selImg=null;selMask=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
@@ -857,7 +943,7 @@ selBtnEl.addEventListener('touchend',e=>{if(Date.now()-selBtnEl._dwnT>600){cance
 //  BG COLOR
 // ═══════════════════════════════════════════════════════
 const bgInput=document.getElementById('bg-input'),bgSwatch=document.getElementById('bg-swatch');
-function applyBg(hex){bgColor=hex;bgSwatch.style.background=hex;bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid rgba(0,0,0,.18)':'none';document.getElementById('paper').style.background=hex;bgRGB=hexToRGB01(hex);scheduleDraw();}
+function applyBg(hex){bgColor=hex;bgSwatch.style.background=hex;bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid rgba(0,0,0,.18)':'none';document.getElementById('paper').style.background=hex;bgRGB=hexToRGB01(hex);markBgDirty();}
 applyBg('#ffffff');
 bgInput.addEventListener('input',e=>applyBg(e.target.value));bgInput.addEventListener('change',e=>applyBg(e.target.value));
 
@@ -925,7 +1011,7 @@ function renderLayers(){
     arrows.appendChild(upBtn);arrows.appendChild(dnBtn);
     const tw=document.createElement('div');tw.className='lthumb';
     const tc=document.createElement('canvas');tc.id='th-'+layer.id;tc.width=34;tc.height=34;
-    tw.appendChild(tc);tw.addEventListener('pointerdown',()=>{gActiveIdx=i;renderLayers();});
+    tw.appendChild(tc);tw.addEventListener('pointerdown',()=>{gActiveIdx=i;markBgDirty();renderLayers();});
     const info=document.createElement('div');info.className='linfo';
     const nm=document.createElement('div');nm.className='lname';nm.textContent=layer.name;
     const opr=document.createElement('div');opr.className='loprow';
@@ -934,7 +1020,7 @@ function renderLayers(){
     opr.appendChild(ocsl);opr.appendChild(oval);info.appendChild(nm);info.appendChild(opr);
     const BLENDS=[{k:'normal',l:'通常'},{k:'multiply',l:'乗算'},{k:'overlay',l:'オバレイ'}];
     const bmodes=document.createElement('div');bmodes.className='lbmodes';
-    BLENDS.forEach(({k,l})=>{const b=document.createElement('div');b.className='lbm'+(layer.blend===k?' act':'');b.textContent=l;b.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();layer.blend=k;bmodes.querySelectorAll('.lbm').forEach(x=>x.classList.remove('act'));b.classList.add('act');scheduleDraw();});bmodes.appendChild(b);});
+    BLENDS.forEach(({k,l})=>{const b=document.createElement('div');b.className='lbm'+(layer.blend===k?' act':'');b.textContent=l;b.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();layer.blend=k;bmodes.querySelectorAll('.lbm').forEach(x=>x.classList.remove('act'));b.classList.add('act');markBgDirty();});bmodes.appendChild(b);});
     const hexCol=rgb01ToHex(layer.color);
     const cd=document.createElement('div');cd.className='lcd';
     const sw2=document.createElement('div');sw2.className='lcd-sw';sw2.style.background=hexCol;cd.appendChild(sw2);
@@ -942,9 +1028,9 @@ function renderLayers(){
     ci.addEventListener('input',ev=>{sw2.style.background=ev.target.value;recolorLayer(layer,ev.target.value);});
     ci.addEventListener('change',()=>captureNow());cd.appendChild(ci);
     const vb=document.createElement('div');vb.className='leye'+(layer.visible?'':' hidden');vb.textContent=layer.visible?'◎':'◯';
-    vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;vb.textContent=layer.visible?'◎':'◯';vb.classList.toggle('hidden',!layer.visible);scheduleDraw();});
+    vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;vb.textContent=layer.visible?'◎':'◯';vb.classList.toggle('hidden',!layer.visible);markBgDirty();});
     const db=document.createElement('div');db.className='ldel';db.textContent='✕';
-    db.addEventListener('pointerdown',e=>{e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);gLayers.splice(i,1);gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);scheduleDraw();captureNow();renderLayers();});
+    db.addEventListener('pointerdown',e=>{e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);gLayers.splice(i,1);gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);markBgDirty();captureNow();renderLayers();});
     item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
     list.appendChild(item);
     (function(el2,lay){
@@ -952,7 +1038,7 @@ function renderLayers(){
       el2.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
       const f2=el2.querySelector('.csl-fill'),k2=el2.querySelector('.csl-knob');
       function r2(){const p=(val2-mn)/(mx-mn)*100;f2.style.width=p+'%';k2.style.left=p+'%';}
-      function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;oval.textContent=val2+'%';scheduleDraw();}
+      function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;oval.textContent=val2+'%';markBgDirty();}
       el2.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();el2.setPointerCapture(e.pointerId);pd=true;sx=e.clientX;sv=val2;},{passive:false});
       el2.addEventListener('pointermove',function(e){if(!pd)return;e.preventDefault();a2(sv+(e.clientX-sx)/rt);},{passive:false});
       el2.addEventListener('pointerup',()=>pd=false,{passive:false});el2.addEventListener('pointercancel',()=>pd=false,{passive:false});r2();
@@ -960,7 +1046,7 @@ function renderLayers(){
   });
   setTimeout(updateThumbs,50);
 }
-document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();addGLLayer('レイヤー '+(gLayers.length+1),'#000000');scheduleDraw();captureNow();renderLayers();});
+document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();addGLLayer('レイヤー '+(gLayers.length+1),'#000000');markBgDirty();captureNow();renderLayers();});
 
 // ═══════════════════════════════════════════════════════
 //  FILE OPEN
@@ -977,7 +1063,7 @@ document.getElementById('file-input').addEventListener('change',function(){
     const flipped=new Uint8Array(CW*CH*4);
     for(let row=0;row<CH;row++){const s=(CH-1-row)*CW*4;flipped.set(id.data.subarray(s,s+CW*4),row*CW*4);}
     gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,flipped);
-    scheduleDraw();captureNow();showToast('画像を読み込みました');
+    markBgDirty();captureNow();showToast('画像を読み込みました');
   };img.src=ev.target.result;};reader.readAsDataURL(file);this.value='';
 });
 
@@ -994,7 +1080,9 @@ szConfirm.addEventListener('pointerdown',e=>{
   document.getElementById('paper').style.width=CW+'px';document.getElementById('paper').style.height=CH+'px';document.getElementById('paper').style.background=bgColor;
   gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
   for(let i=0;i<2;i++){gl.deleteTexture(compTex[i]);gl.deleteFramebuffer(compFBO[i]);compTex[i]=makeTexture(CW,CH,null);compFBO[i]=makeFBO(compTex[i]);}
-  hist=[];histIdx=-1;addGLLayer('レイヤー 1','#000000');fitView();captureNow();renderLayers();
+  if(bgCompTex){gl.deleteTexture(bgCompTex);gl.deleteFramebuffer(bgCompFBO);}
+  bgCompTex=makeTexture(CW,CH,null);bgCompFBO=makeFBO(bgCompTex);bgCompDirty=true;
+  hist=[];histIdx=-1;addGLLayer('レイヤー 1','#000000');fitView();markBgDirty();captureNow();renderLayers();
   document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');
   showToast(`${CW}×${CH} / アンドゥ最大${maxUndoCount()}回`);
 });
@@ -1059,7 +1147,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
   if(!initWebGL())return;
   document.getElementById('paper').style.width=CW+'px';document.getElementById('paper').style.height=CH+'px';document.getElementById('paper').style.background=bgColor;
   addGLLayer('レイヤー 1','#000000');
-  fitView();scheduleDraw();captureNow();
+  fitView();markBgDirty();captureNow();
 
   function mkPenCb(key){return v=>{if(activeTool==='pen')bSize=bMin=bThresh=bCurve=stabLen=bPressure=undefined;if(activeTool==='pen'){if(key==='sz')bSize=v;else if(key==='min')bMin=v;else if(key==='thresh')bThresh=v/100;else if(key==='stab')stabLen=v;}TOOLS.pen[key==='sz'?'sz':key==='min'?'min':key==='thresh'?'thresh':key==='stab'?'stab':key]=key==='thresh'?v/100:v;drawCurveOn('curve-cv',TOOLS.pen.sz,TOOLS.pen.min,TOOLS.pen.pressure,TOOLS.pen.curve,TOOLS.pen.thresh);if(key==='stab')drawStabOn('stab-cv',TOOLS.pen.stab);};}
 
