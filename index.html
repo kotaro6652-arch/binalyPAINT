@@ -181,7 +181,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
     <div class="sz-opt cur" data-w="2360" data-h="1640"><div class="sz-opt-row">1x 標準 <small>2360×1640</small></div></div>
     <div class="sz-opt" data-w="4720" data-h="3280"><div class="sz-opt-row">2x 高解像度 <small>4720×3280</small></div></div>
     <div class="sz-opt" data-w="9440" data-h="6560"><div class="sz-opt-row">4x 超高解像度 <small>9440×6560</small></div><div class="sz-warn">⚠ アンドゥ3回 / メモリ~200MB/レイヤー</div></div>
-    <button id="sz-confirm">⚠ タップで確定（描画消去）</button>
+    <button id="sz-confirm">🔄 タップで確定（描画を拡大縮小して変換）</button>
     <div id="sz-ver">BinaryPaint v19.5<br>R8レイヤー + ビューポート合成<br>iPad 10世代 / Apple Pencil 対応<br>© 2025 Claude / Anthropic</div>
   </div>
   <div class="toppanel" id="sv-panel">
@@ -936,28 +936,30 @@ function updateThumbs(){
 
 // ── View ────────────────────────────────────────────────────
 function fitView(){
+  // 実寸: 1キャンバスpx = 1物理px → scale = 1/devicePixelRatio
+  // キャンバスが画面より大きければ収まる最大倍率まで縮小
   const sw=window.innerWidth,sh=window.innerHeight;
-  // 実寸表示: キャンバス1px = デバイス1CSSピクセル (scale=1.0)
-  // キャンバスがスクリーンより大きければ収まるよう縮小
+  const dpr=window.devicePixelRatio||1;
+  const realScale=1/dpr; // 物理ピクセル等倍
   const maxFit=Math.min(sw/CW,sh/CH);
-  view.scale=Math.min(1.0,maxFit); // 1.0 = 実寸、大きいキャンバスは収まる最大倍率
+  view.scale=Math.min(realScale,maxFit);
   view.x=(sw-CW*view.scale)/2;
   view.y=(sh-CH*view.scale)/2;
   view.rot=0;
   applyView();
 }
-// 起動時は常に実寸センター表示 (保存されたビュー位置は無視)
 function resetView(){
+  // 実寸: キャンバス左右がモニタ左右と一致、物理ピクセル等倍
+  // scale = screenW / CW → キャンバス左=0, キャンバス右=screenW
   const sw=window.innerWidth,sh=window.innerHeight;
-  const maxFit=Math.min(sw/CW,sh/CH);
-  view.scale=Math.min(1.0,maxFit);
-  view.x=(sw-CW*view.scale)/2;
+  view.scale=sw/CW; // キャンバス幅 = 画面幅 ピッタリ
+  view.x=0;
   view.y=(sh-CH*view.scale)/2;
   view.rot=0;
   flipState=false;
   document.getElementById('flip-btn').style.background='rgba(56,217,217,.15)';
   applyView();
-  showToast('実寸 ('+Math.round(view.scale*100)+'%) センター');
+  showToast('実寸 ('+Math.round(view.scale*100)+'%)');
 }
 function applyView(){
   const cw=document.getElementById('cw'),{x,y,scale,rot}=view;
@@ -1300,16 +1302,8 @@ document.addEventListener('touchstart',function(e){
   if(tabId!==null){
     e.preventDefault();
     const pn=TAB_MAP[tabId];if(!pn)return;
-    if(TOOL_TABS.has(tabId)){
-      // Pen/Marker tab: hold=panel, tap=switch tool
-      let th=setTimeout(()=>{th=null;openPanelFn(pn);},TAB_HOLD_MS);
-      const done=()=>{if(th){clearTimeout(th);th=null;tabSwitchTool(pn);}};
-      document.addEventListener('touchend',done,{once:true,passive:true});
-      document.addEventListener('touchcancel',()=>{if(th){clearTimeout(th);th=null;}},{once:true,passive:true});
-    }else{
-      // Eraser/Layer: immediate
-      openPanelFn(pn);
-    }
+    // 全タブ即時開閉（スタイラス）
+    openPanelFn(pn);
     return;
   }
   const tgt=classifyPenTarget(st.clientX,st.clientY);
@@ -1490,10 +1484,10 @@ function openPanelFn(id){
   if(PANELS[id])document.getElementById(PANELS[id]).classList.add('open');
   if(TABS[id])document.getElementById(TABS[id]).classList.add('act');
   rpg.classList.add('shifted');
-  // Only rebuild layer list when pen is NOT drawing (avoid DOM thrash during stroke)
-  if(id==='layers'&&penId===null)renderLayers();
   if(id==='brush'&&activeTool!=='pen')switchTool('pen');
   if(id==='marker'&&activeTool!=='marker')switchTool('marker');
+  // Defer heavy DOM work to next frame — never block pointer events
+  if(id==='layers')requestAnimationFrame(()=>{if(penId===null)renderLayers();});
 }
 function closePanel(r=true){
   clearTimeout(_panelAutoCloseTimer);
@@ -1512,61 +1506,35 @@ function schedulePanelAutoClose(){
 }
 
 // ── Tab interaction ──────────────────────────────────────────
-const TAB_HOLD_MS=95; // 1/4 of original 380ms
-const TOOL_TABS=new Set(['tab-br','tab-mk']);
-
-function tabSwitchTool(panelName){
-  // Switch active tool without opening panel
-  if(panelName==='brush'){
-    switchTool('pen');
-    document.querySelectorAll('.rtab').forEach(t=>t.classList.remove('act'));
-    document.getElementById('tab-br').classList.add('act');
-    showToast('ペン');
-  }else if(panelName==='marker'){
-    switchTool('marker');
-    document.querySelectorAll('.rtab').forEach(t=>t.classList.remove('act'));
-    document.getElementById('tab-mk').classList.add('act');
-    showToast('マーカー');
-  }
-}
+// 全タブ共通: pointerdown で即時開閉。
+// 指がタブから6px以上動いたらパネルを閉じてドラッグモードへ移行。
+// TOOL_TABS の区別を廃止 — 複雑な hold/tap ロジックがフリーズの原因だった。
+const TOOL_TABS=new Set(['tab-br','tab-mk']); // サブパレットドラッグ用に残す
 
 Object.entries(TAB_MAP).forEach(([tabId,panelName])=>{
   if(!panelName)return;
   const el=document.getElementById(tabId);if(!el)return;
-  let holdTimer=null;
+  let downX=0,downY=0,dragging=false;
 
-  if(TOOL_TABS.has(tabId)){
-    // Pen/Marker: hold=open panel, quick tap=switch tool
-    el.addEventListener('pointerdown',function(e){
-      if(e.pointerType==='pen')return;
-      e.preventDefault();e.stopPropagation();
-      holdTimer=setTimeout(()=>{holdTimer=null;openPanelFn(panelName);},TAB_HOLD_MS);
-    },{passive:false});
-    el.addEventListener('pointermove',function(e){
-      // Cancel hold if finger moves significantly (drag gesture started)
-      if(holdTimer&&(Math.abs(e.movementX)>4||Math.abs(e.movementY)>4)){
-        clearTimeout(holdTimer);holdTimer=null;
-        if(openPanel==='brush'||openPanel==='marker')closePanel();
-      }
-    },{passive:true});
-    el.addEventListener('pointerup',function(e){
-      if(holdTimer){clearTimeout(holdTimer);holdTimer=null;
-        // Quick tap: switch tool, close any open tool panel
-        tabSwitchTool(panelName);
-        if(openPanel==='brush'||openPanel==='marker')closePanel();
-      }
-    },{passive:false});
-    el.addEventListener('pointercancel',function(){
-      if(holdTimer){clearTimeout(holdTimer);holdTimer=null;}
-    },{passive:false});
-  }else{
-    // Eraser/Layer: immediate open on tap
-    el.addEventListener('pointerdown',function(e){
-      if(e.pointerType==='pen')return;
-      e.preventDefault();e.stopPropagation();
-      openPanelFn(panelName);
-    },{passive:false});
-  }
+  el.addEventListener('pointerdown',function(e){
+    if(e.pointerType==='pen')return;
+    e.preventDefault();e.stopPropagation();
+    downX=e.clientX;downY=e.clientY;dragging=false;
+    // 即時開閉（全タブ共通）
+    openPanelFn(panelName);
+  },{passive:false});
+
+  el.addEventListener('pointermove',function(e){
+    if(dragging)return;
+    if(Math.abs(e.clientX-downX)>6||Math.abs(e.clientY-downY)>6){
+      dragging=true;
+      // ドラッグ開始 → パネルを閉じてドラッグモードへ
+      if(openPanel===panelName)closePanel();
+    }
+  },{passive:true});
+
+  el.addEventListener('pointerup',()=>{dragging=false;},{passive:true});
+  el.addEventListener('pointercancel',()=>{dragging=false;},{passive:true});
 });
 document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;const szp=document.getElementById('sz-panel'),svp=document.getElementById('sv-panel');if(!szp.contains(e.target)&&e.target!==document.getElementById('sz-btn'))szp.classList.remove('open');if(!svp.contains(e.target)&&e.target!==document.getElementById('sv-btn'))svp.classList.remove('open');},{passive:true,capture:false});
 
@@ -1759,14 +1727,81 @@ document.getElementById('file-input').addEventListener('change',function(){
 const szBtn=document.getElementById('sz-btn'),szPanel=document.getElementById('sz-panel'),szConfirm=document.getElementById('sz-confirm');
 szBtn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();szPanel.classList.toggle('open');szConfirm.style.display='none';pendingSize=null;});
 document.querySelectorAll('.sz-opt').forEach(opt=>{opt.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();const w=+opt.dataset.w,h=+opt.dataset.h;if(w===CW&&h===CH){showToast('現在と同じサイズです');return;}pendingSize={w,h};document.querySelectorAll('.sz-opt').forEach(o=>o.classList.remove('cur'));opt.classList.add('cur');szConfirm.style.display='block';});});
-szConfirm.addEventListener('pointerdown',e=>{
+szConfirm.addEventListener('pointerdown',async e=>{
   e.preventDefault();e.stopPropagation();if(!pendingSize)return;
-  const{w,h}=pendingSize;CW=w;CH=h;
-  gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
-  _r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
-  addGLLayer('レイヤー 1','#000000');fitView();setTimeout(captureNow,0);renderLayers();
-  document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');
-  showToast(`${CW}×${CH} / アンドゥ最大${maxUndoCount()}回`);
+  const oldCW=CW,oldCH=CH;
+  const{w,h}=pendingSize;
+
+  showToast('変換中…');
+
+  // Step 1: read + scale each layer's pixels to new size using 2D canvas
+  const scaledLayers=[];
+  for(const l of gLayers){
+    const r8old=new Uint8Array(oldCW*oldCH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+    gl.readPixels(0,0,oldCW,oldCH,gl.RED,gl.UNSIGNED_BYTE,r8old);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+
+    // Convert R8→RGBA canvas (flip Y: WebGL bottom-up→canvas top-down)
+    const srcC=document.createElement('canvas');srcC.width=oldCW;srcC.height=oldCH;
+    const srcCtx=srcC.getContext('2d');
+    const rgba=new Uint8ClampedArray(oldCW*oldCH*4);
+    for(let row=0;row<oldCH;row++){
+      const fboRow=oldCH-1-row;
+      for(let col=0;col<oldCW;col++){
+        const v=r8old[fboRow*oldCW+col];
+        const oi=(row*oldCW+col)*4;
+        rgba[oi]=rgba[oi+1]=rgba[oi+2]=v;rgba[oi+3]=v;
+      }
+    }
+    srcCtx.putImageData(new ImageData(rgba,oldCW,oldCH),0,0);
+
+    // Scale to new size using 2D canvas drawImage (bilinear)
+    const dstC=document.createElement('canvas');dstC.width=w;dstC.height=h;
+    const dstCtx=dstC.getContext('2d');
+    dstCtx.imageSmoothingEnabled=true;
+    dstCtx.imageSmoothingQuality='high';
+    dstCtx.drawImage(srcC,0,0,w,h);
+
+    // Convert back to R8 (threshold at 128) with Y-flip for WebGL
+    const dstId=dstCtx.getImageData(0,0,w,h);
+    const r8new=new Uint8Array(w*h);
+    for(let row=0;row<h;row++){
+      const fboRow=h-1-row;
+      for(let col=0;col<w;col++){
+        r8new[fboRow*w+col]=dstId.data[(row*w+col)*4+3]>128?255:0;
+      }
+    }
+    scaledLayers.push({...l,r8:r8new});
+    await new Promise(r=>setTimeout(r,0)); // yield between layers
+  }
+
+  // Step 2: destroy old GL resources
+  gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});
+  gLayers=[];_r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
+
+  // Step 3: set new canvas size
+  CW=w;CH=h;
+
+  // Step 4: create new layers with scaled pixels
+  for(const s of scaledLayers){
+    const tex=makeR8Texture(CW,CH),fbo=makeR8FBO(tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.bindTexture(gl.TEXTURE_2D,tex);
+    gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,s.r8);
+    gl.bindTexture(gl.TEXTURE_2D,null);
+    scheduleMipmap({tex});
+    gLayers.push({id:s.id,name:s.name,color:s.color,opacity:s.opacity,visible:s.visible,blend:s.blend,tex,fbo});
+  }
+  gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
+
+  // Step 5: full-width view (same as 実寸ボタン)
+  resetView();
+
+  setTimeout(captureNow,0);renderLayers();
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;
+  szPanel.classList.remove('open');
+  showToast(`${CW}×${CH} に変換完了 / アンドゥ最大${maxUndoCount()}回`);
 });
 
 // ════════════════════════════════════════════════════════════
