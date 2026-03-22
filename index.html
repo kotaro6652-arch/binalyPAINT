@@ -525,10 +525,24 @@ function flushBrush(){
   gl.uniform1f(ul(PROG.brush,'u_val'),eraserOn?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
-  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.bindTexture(gl.TEXTURE_2D,null);
+  // Schedule mipmap regen via rAF — batched, non-blocking
+  scheduleMipmap(layer);
   scheduleDraw();
+}
+
+// ── Mipmap dirty set: batch all regen into single rAF ─────────
+const _mipmapDirty=new Set();let _mipmapPending=false;
+function scheduleMipmap(layer){
+  _mipmapDirty.add(layer);
+  if(!_mipmapPending){_mipmapPending=true;requestAnimationFrame(()=>{
+    _mipmapPending=false;
+    for(const l of _mipmapDirty){
+      gl.bindTexture(gl.TEXTURE_2D,l.tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+    }
+    _mipmapDirty.clear();
+    gl.bindTexture(gl.TEXTURE_2D,null);
+  });}
 }
 function queueDot(x,y,d){
   if(instCount>=MAX_INST)flushBrush();
@@ -620,38 +634,45 @@ function finishStroke(){
 }
 
 // ════════════════════════════════════════════════════════════
-//  UNDO — 1-bit pack of R8 data
-//  R8: each byte is 0 (no ink) or 255 (ink).
-//  Pack → 1 bit/pixel = 8× compression.
-//  At 4x: 62MB → 7.75MB per undo snapshot per layer.
+//  UNDO — drawing pixels only, per-stroke, non-blocking
+//
+//  Design:
+//  • drawHist: pixel snapshots ONLY (R8 packed bits per layer).
+//    Captured once per stroke-end, not debounced.
+//    Two-finger = undo, three-finger = redo.
+//  • Layer properties (color, opacity, blend, visibility, name)
+//    are NOT in undo history. They are immediate permanent changes.
+//  • captureNow uses setTimeout(0) to yield after touchend,
+//    so readPixels never competes with active touch input.
 // ════════════════════════════════════════════════════════════
-function maxUndoCount(){return CW>=9440?3:CW>=4720?8:15;}
+function maxUndoCount(){return CW>=9440?3:CW>=4720?8:20;}
 let hist=[],histIdx=-1,undoBusy=false;
 
-// Shared R8 buffer (62MB at 4x — allocated once, reused)
 let _r8Buf=null,_r8BufPx=0;
 function getR8Buf(){
   const n=CW*CH;if(!_r8Buf||_r8BufPx!==n){_r8Buf=new Uint8Array(n);_r8BufPx=n;}return _r8Buf;
 }
-
 function packBits(r8){
   const n=r8.length,bits=new Uint8Array(Math.ceil(n/8));
-  for(let i=0;i<n;i++)if(r8[i]>127)bits[i>>3]|=(1<<(i&7));
-  return bits;
+  for(let i=0;i<n;i++)if(r8[i]>127)bits[i>>3]|=(1<<(i&7));return bits;
 }
 function unpackBits(bits,n){
   const r8=new Uint8Array(n);
-  for(let i=0;i<n;i++)if((bits[i>>3]>>(i&7))&1)r8[i]=255;
-  return r8;
+  for(let i=0;i<n;i++)if((bits[i>>3]>>(i&7))&1)r8[i]=255;return r8;
 }
 
-function captureDebounceMs(){return CW>=9440?5000:CW>=4720?2000:300;}
-function deferCapture(){clearTimeout(deferCapture._t);deferCapture._t=setTimeout(captureNow,captureDebounceMs());}
-deferCapture._t=null;
+// Called ONCE after each stroke ends. Not debounced — every stroke is one undo step.
+function captureStroke(){
+  // If pen still somehow down, wait
+  if(penId!==null){setTimeout(captureStroke,50);return;}
+  // Use setTimeout(0) to yield to event loop after touchend
+  setTimeout(captureNow,0);
+}
 
 async function captureNow(){
   if(penId!==null||undoBusy)return;
-  undoBusy=true;document.getElementById('undo-busy').classList.add('show');
+  undoBusy=true;
+  document.getElementById('undo-busy').classList.add('show');
   try{
     if(histIdx<hist.length-1)hist.length=histIdx+1;
     const snap=[];
@@ -660,28 +681,34 @@ async function captureNow(){
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
       gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-      snap.push({bits:packBits(raw),color:[...l.color],opacity:l.opacity,blend:l.blend,name:l.name,visible:l.visible});
-      await new Promise(r=>setTimeout(r,0)); // yield between layers
+      // Store pixel data ONLY — no layer properties
+      snap.push({id:l.id,bits:packBits(raw)});
+      await new Promise(r=>setTimeout(r,0));
     }
     hist.push(snap);
     const mx=maxUndoCount();if(hist.length>mx+1)hist.shift();else histIdx++;
-    updateThumbs();
+    // Update thumbs only if layer panel is open (avoids readPixels overhead when hidden)
+    if(openPanel==='layers')updateThumbs();
   }finally{undoBusy=false;document.getElementById('undo-busy').classList.remove('show');}
 }
+
 function restoreSnap(snap){
   const n=CW*CH;
-  snap.forEach((s,i)=>{
-    if(!gLayers[i])return;const l=gLayers[i];
-    l.color=[...s.color];l.opacity=s.opacity;l.blend=s.blend;l.name=s.name;l.visible=s.visible;
+  snap.forEach(s=>{
+    // Match by layer id — robust to layer reorder
+    const l=gLayers.find(x=>x.id===s.id);if(!l)return;
     const r8=unpackBits(s.bits,n);
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-    gl.generateMipmap(gl.TEXTURE_2D);
+    scheduleMipmap(l);
   });
-  scheduleDraw();updateThumbs();renderLayers();
+  scheduleDraw();
+  if(openPanel==='layers')updateThumbs();
 }
 function undo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx<=0){showToast('これ以上元に戻せません');return;}histIdx--;restoreSnap(hist[histIdx]);showToast('元に戻す');}
 function redo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx>=hist.length-1){showToast('やり直しはありません');return;}histIdx++;restoreSnap(hist[histIdx]);showToast('やり直し');}
+// Compatibility alias for non-stroke callers (selection, file open)
+const deferCapture=()=>setTimeout(captureNow,0);
 
 // ════════════════════════════════════════════════════════════
 //  LAYERS
@@ -701,7 +728,7 @@ function recolorLayer(layer,hexColor){layer.color=hexToRGB01(hexColor);scheduleD
 function moveLayer(from,to){
   if(to<0||to>=gLayers.length)return;
   const moved=gLayers.splice(from,1)[0];gLayers.splice(to,0,moved);
-  gActiveIdx=gLayers.indexOf(moved);scheduleDraw();captureNow();renderLayers();
+  gActiveIdx=gLayers.indexOf(moved);scheduleDraw();renderLayers();
 }
 
 // ── Thumbnails ─────────────────────────────────────────────
@@ -844,8 +871,9 @@ function writeR8Bbox(tex,bx,by,bw,bh,buf){
   const fboY=CH-by-bh;
   gl.bindTexture(gl.TEXTURE_2D,tex);
   gl.texSubImage2D(gl.TEXTURE_2D,0,bx,fboY,bw,bh,gl.RED,gl.UNSIGNED_BYTE,buf);
-  gl.generateMipmap(gl.TEXTURE_2D);
   gl.bindTexture(gl.TEXTURE_2D,null);
+  // Schedule mipmap regen — find the layer this tex belongs to
+  const l=gLayers.find(x=>x.tex===tex);if(l)scheduleMipmap(l);
 }
 // Convert R8 bbox (FBO order) to small RGBA 2D canvas (canvas order, y=0=top).
 function r8BboxToCanvas(r8buf,bw,bh,color){
@@ -880,7 +908,7 @@ function canvasBboxToR8(canvasEl,bw,bh,existing_r8buf){
 function execLasso(){
   const l=gLayers[gActiveIdx];
   if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
-  captureNow();
+  setTimeout(captureNow,0);
   const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
   let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
   let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
@@ -950,7 +978,7 @@ function commitTransform(){
   const r8new=canvasBboxToR8(mergeC,obw,obh,null);
   writeR8Bbox(l.tex,obx,oby,obw,obh,r8new);
 
-  commitCleanup();scheduleDraw();captureNow();showToast('変形確定');
+  commitCleanup();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
 }
 function commitCleanup(){
   selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
@@ -1055,14 +1083,14 @@ document.addEventListener('touchend',function(e){
   if(!st)return;e.preventDefault();
   prc.style.display='none';penId=null;selHandle=null;selPrevPt=null;
   if(selState==='lasso'){drawSelOv();return;}
-  finishStroke();deferCapture();
+  finishStroke();captureStroke();
 },{passive:false,capture:true});
 
 document.addEventListener('touchcancel',function(e){
   if(penId===null)return;
   for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){
     penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;
-    finishStroke();deferCapture();break;
+    finishStroke();captureStroke();break;
   }
 },{passive:false,capture:true});
 
@@ -1160,7 +1188,22 @@ function renderLayers(){
     arrows.appendChild(upBtn);arrows.appendChild(dnBtn);
     const tw=document.createElement('div');tw.className='lthumb';
     const tc=document.createElement('canvas');tc.id='th-'+layer.id;tc.width=TSIZE;tc.height=TSIZE;
-    tw.appendChild(tc);tw.addEventListener('pointerdown',e=>{gActiveIdx=i;scheduleDraw();renderLayers();});
+    tw.appendChild(tc);
+    // Helper: activate this layer immediately with visual feedback
+    function activateLayer(){
+      if(gActiveIdx===i)return; // already active
+      gActiveIdx=i;
+      // Immediate visual update — no need to wait for full renderLayers()
+      document.querySelectorAll('#llist .li').forEach(el=>el.classList.remove('act'));
+      item.classList.add('act');
+      scheduleDraw();
+    }
+    tw.addEventListener('pointerdown',e=>{e.stopPropagation();activateLayer();});
+    item.addEventListener('pointerdown',e=>{
+      if(e.target===item||e.target===nm||e.target===tc||e.target===tw){
+        activateLayer();
+      }
+    });
     const info=document.createElement('div');info.className='linfo';
     const nm=document.createElement('div');nm.className='lname';nm.textContent=layer.name;
     const opr=document.createElement('div');opr.className='loprow';
@@ -1176,11 +1219,19 @@ function renderLayers(){
     const ci=document.createElement('input');ci.type='color';ci.value=hexCol;
     // recolorLayer now just updates color — no expensive readPixels!
     ci.addEventListener('input',ev=>{sw2.style.background=ev.target.value;recolorLayer(layer,ev.target.value);});
-    ci.addEventListener('change',()=>captureNow());cd.appendChild(ci);
+    // Color change: NOT in undo history (property change only)
+    cd.appendChild(ci);
     const vb=document.createElement('div');vb.className='leye'+(layer.visible?'':' hidden');vb.textContent=layer.visible?'◎':'◯';
+    // Visibility change: NOT in undo history
     vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;vb.textContent=layer.visible?'◎':'◯';vb.classList.toggle('hidden',!layer.visible);scheduleDraw();});
     const db=document.createElement('div');db.className='ldel';db.textContent='✕';
-    db.addEventListener('pointerdown',e=>{e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);gLayers.splice(i,1);gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);scheduleDraw();captureNow();renderLayers();});
+    // Layer delete: captures undo (structural change)
+    db.addEventListener('pointerdown',e=>{e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}
+      gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);
+      gLayers.splice(i,1);gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
+      // Purge orphan undo entries for deleted layer
+      hist=[];histIdx=-1;
+      scheduleDraw();renderLayers();showToast('レイヤーを削除');});
     item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
     list.appendChild(item);
     (function(el2,lay){
@@ -1188,15 +1239,27 @@ function renderLayers(){
       el2.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
       const f2=el2.querySelector('.csl-fill'),k2=el2.querySelector('.csl-knob');
       function r2(){const p=(val2-mn)/(mx-mn)*100;f2.style.width=p+'%';k2.style.left=p+'%';}
+      // Opacity change: NOT in undo history (property change only)
       function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;oval.textContent=val2+'%';scheduleDraw();}
       el2.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();el2.setPointerCapture(e.pointerId);pd=true;sx=e.clientX;sv=val2;},{passive:false});
       el2.addEventListener('pointermove',function(e){if(!pd)return;e.preventDefault();a2(sv+(e.clientX-sx)/rt);},{passive:false});
       el2.addEventListener('pointerup',()=>pd=false,{passive:false});el2.addEventListener('pointercancel',()=>pd=false,{passive:false});r2();
     })(ocsl,layer);
   });
-  setTimeout(updateThumbs,50);
+  // Throttle thumb updates: only if layer panel is visible, max once per 500ms
+  if(openPanel==='layers'){
+    clearTimeout(renderLayers._thumbT);
+    renderLayers._thumbT=setTimeout(updateThumbs,200);
+  }
 }
-document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();addGLLayer('レイヤー '+(gLayers.length+1),'#000000');scheduleDraw();captureNow();renderLayers();});
+renderLayers._thumbT=null;
+document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  addGLLayer('レイヤー '+(gLayers.length+1),'#000000');
+  // New layer: capture initial empty state
+  hist=[];histIdx=-1;
+  scheduleDraw();setTimeout(captureNow,0);renderLayers();
+});
 
 // ════════════════════════════════════════════════════════════
 //  FILE OPEN
@@ -1214,8 +1277,8 @@ document.getElementById('file-input').addEventListener('change',function(){
     const r8=new Uint8Array(CW*CH);
     for(let row=0;row<CH;row++){const fboRow=CH-1-row;for(let col=0;col<CW;col++)r8[fboRow*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
     gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-    gl.generateMipmap(gl.TEXTURE_2D);gl.bindTexture(gl.TEXTURE_2D,null);
-    scheduleDraw();captureNow();showToast('画像を読み込みました');
+    gl.bindTexture(gl.TEXTURE_2D,null);scheduleMipmap(l);
+    scheduleDraw();setTimeout(captureNow,0);showToast('画像を読み込みました');
   };img.src=ev.target.result;};reader.readAsDataURL(file);this.value='';
 });
 
@@ -1230,7 +1293,7 @@ szConfirm.addEventListener('pointerdown',e=>{
   const{w,h}=pendingSize;CW=w;CH=h;
   gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
   _r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
-  addGLLayer('レイヤー 1','#000000');fitView();captureNow();renderLayers();
+  addGLLayer('レイヤー 1','#000000');fitView();setTimeout(captureNow,0);renderLayers();
   document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');
   showToast(`${CW}×${CH} / アンドゥ最大${maxUndoCount()}回`);
 });
@@ -1302,7 +1365,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 (function init(){
   if(!initWebGL())return;
   addGLLayer('レイヤー 1','#000000');
-  fitView();scheduleDraw();captureNow();
+  fitView();scheduleDraw();setTimeout(captureNow,0);
 
   // Pen sliders
   initCsl('csl-sz',  12,v=>{TOOLS.pen.sz=v;if(activeTool==='pen')bSize=v;document.getElementById('v-sz').textContent=v+'px';drawCurveOn('curve-cv',TOOLS.pen.sz,TOOLS.pen.min,TOOLS.pen.pressure,TOOLS.pen.curve,TOOLS.pen.thresh);});
