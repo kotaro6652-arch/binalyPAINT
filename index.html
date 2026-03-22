@@ -35,6 +35,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #bg-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;touch-action:manipulation;-webkit-appearance:none}
 #sv-btn{right:10px}
 #open-btn{right:calc(10px + 84px + 8px)}
+#reset-view-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px);z-index:220;background:var(--sf);border:1px solid var(--bd2);border-radius:20px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
+#reset-view-btn:active{background:rgba(91,156,246,.18);color:var(--acc)}
 .toppanel{position:fixed;top:44px;z-index:219;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;padding:10px;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5);touch-action:manipulation}
 .toppanel.open{display:block}
 #sz-panel{left:10px;min-width:228px}
@@ -139,6 +141,25 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 #zl{position:fixed;bottom:14px;right:14px;font-size:11px;font-family:'DM Mono',monospace;color:var(--tx2);pointer-events:none;z-index:100}
 #undo-busy{position:fixed;bottom:38px;right:14px;font-size:10px;font-family:'DM Mono',monospace;color:var(--ora);pointer-events:none;z-index:100;display:none}
 #undo-busy.show{display:block}
+
+/* ── Sub-tool Palette ── */
+#sub-palette{position:fixed;z-index:190;touch-action:none;user-select:none}
+#sp-header{width:100%;height:24px;display:flex;align-items:center;justify-content:space-between;padding:0 6px;cursor:grab;touch-action:none}
+#sp-body{display:flex;flex-direction:column;gap:4px;padding:5px;background:rgba(20,20,26,.96);border:1px solid rgba(255,255,255,.18);border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.6)}
+#sp-dot{width:14px;height:14px;border-radius:50%;background:var(--aqua);box-shadow:0 1px 5px rgba(56,217,217,.5);flex-shrink:0}
+#sp-title{font-size:9px;color:rgba(56,217,217,.7);font-family:'DM Mono',monospace;letter-spacing:.06em;flex:1;text-align:center}
+#sp-min-btn{font-size:10px;color:var(--tx2);background:none;border:none;cursor:pointer;padding:0 2px;line-height:1}
+.sp-row{display:flex;flex-direction:column;gap:4px}
+.sp-slot{width:36px;height:36px;border-radius:8px;background:rgba(255,255,255,.07);border:1.5px dashed rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2px;position:relative;touch-action:none;cursor:pointer}
+.sp-slot.has-tool{border-style:solid;border-color:rgba(255,255,255,.3);background:rgba(255,255,255,.11)}
+.sp-slot.active-tool{border-color:var(--acc);background:rgba(91,156,246,.18)}
+.sp-slot.drag-over{border-color:var(--grn);background:rgba(74,222,128,.18)}
+.sp-slot-icon{font-size:14px;line-height:1;pointer-events:none}
+.sp-slot-label{font-size:6px;color:var(--tx2);font-family:'DM Mono',monospace;pointer-events:none;text-align:center;line-height:1.2}
+.sp-slot-sz{font-size:6px;color:var(--aqua);font-family:'DM Mono',monospace;pointer-events:none}
+#sub-palette.minimized #sp-body .sp-col{display:none}
+#sub-palette.minimized #sp-body{border-radius:50%;width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center}
+#sub-palette.minimized #sp-header{display:none}
 </style>
 </head>
 <body>
@@ -150,6 +171,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 
   <div class="topbtn" id="sz-btn">📐 <span id="sz-cur">2360×1640</span></div>
   <div id="bg-wrap"><div id="bg-swatch"></div><span id="bg-label">背景色</span><input type="color" id="bg-input" value="#ffffff"></div>
+  <div id="reset-view-btn">⊙ 実寸</div>
   <div class="topbtn" id="sv-btn">💾 保存</div>
   <label class="topbtn" id="open-btn" for="file-input">📂 開く</label>
   <input type="file" id="file-input" accept="image/*" style="display:none">
@@ -166,6 +188,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
     <div id="sv-now"></div>
     <div class="sv-note">令和形式自動ファイル名。複数レイヤーは個別出力。</div>
     <button id="sv-go">📥 PNG で出力</button>
+    <button id="sv-psd" style="width:100%;padding:9px;margin-top:7px;background:rgba(168,85,247,.18);border:1px solid rgba(168,85,247,.38);border-radius:8px;color:#c084fc;font-size:13px;cursor:pointer;touch-action:manipulation">📦 PSD で出力（Photoshop）</button>
   </div>
 
   <div id="rpanel-group">
@@ -245,9 +268,101 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div id="prc"></div>
   <div id="zl">100%</div>
   <div id="undo-busy">⏳ undo準備中…</div>
+
+  <!-- Sub-tool Palette -->
+  <div id="sub-palette" style="left:200px;top:200px">
+    <div id="sp-body">
+      <div id="sp-header">
+        <div id="sp-dot"></div>
+        <span id="sp-title">PALETTE</span>
+        <button id="sp-min-btn" title="最小化">—</button>
+      </div>
+      <!-- 2列×3行: sp-col×2, 各列3スロット -->
+      <div style="display:flex;gap:4px">
+        <div class="sp-col" style="display:flex;flex-direction:column;gap:4px">
+          <div class="sp-slot" data-slot="0"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="1"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="2"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+        </div>
+        <div class="sp-col" style="display:flex;flex-direction:column;gap:4px">
+          <div class="sp-slot" data-slot="3"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="4"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="5"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
+/* ================================================================
+   BINARYPAINT_META — 変更時は必ずこのブロックを更新すること
+   Version : v19.5+  (2025-03)
+   File    : BinaryPaint.html  ~118KB / ~2150行 単一HTMLファイル
+
+   ── アーキテクチャ ──────────────────────────────────────────
+   描画エンジン : WebGL2
+   レイヤー形式 : R8テクスチャ (1byte/px, 0か255のみ)
+   表示         : ビューポートシェーダー (screen UV→canvas UV 変換)
+   合成         : compA/compB スクリーンサイズFBO ピンポン
+   スロースケール: 直線補間+スタビライザー (Catmull-Rom廃止: 半透明問題のため)
+   アンドゥ     : ストローク単位・ピクセルのみ (プロパティ変更なし)
+   状態保存     : localStorage (saveState/loadState, 500msデバウンス)
+
+   ── 不変条件 (変更禁止ルール) ───────────────────────────────
+   ① flushBrush内にgenerateMipmapを呼ばない
+      → finishStroke()でscheduleMipmap()のみ (rAFバッチ)
+   ② R8テクスチャへの書き込みは0か1.0のみ
+      → SDF/smoothstep/中間値を書かない
+   ③ screenToCanvas/canvasToScreen は両方rotation対応必須
+      → view.rot を考慮した変換 (ccxを軸に回転)
+   ④ captureNow/captureStroke はsetTimeout(fn,0)で非同期のみ
+      → ペン入力中にreadPixelsをブロックしない
+   ⑤ updateThumbsはopenPanel==='layers'のときのみ呼ぶ
+
+   ── 主要変数 ────────────────────────────────────────────────
+   view       : {x, y, scale, rot}  ビューポート状態
+   gLayers[]  : {id,name,color,opacity,visible,blend,tex,fbo}
+   gActiveIdx : アクティブレイヤーindex
+   TOOLS      : {pen:{sz,min,pressure,curve,thresh,stab}, marker:{...}}
+   spSlots[]  : サブパレット6スロット [{type,settings}|null]
+   CW,CH      : キャンバスサイズ (default 2360×1640)
+
+   ── 座標変換フロー ──────────────────────────────────────────
+   タッチ座標(screen) → screenToCanvas() → キャンバスpx座標
+   → BRUSH_VSシェーダー → R8 FBOへ書き込み
+   表示時: COMP_FSシェーダーが screen UV → canvas UV へ変換
+   (u_vxy, u_vscale, u_vrot, u_flip, u_screen, u_canvas 使用)
+
+   ── シェーダー一覧 ──────────────────────────────────────────
+   BRUSH_VS/FS  : インスタンス円描画 → R8 FBO (0 or 1.0)
+   QUAD_VS      : フルスクリーンクワッド
+   COMP_FS      : ビューポート変換+レイヤー合成 (u_vrot対応)
+   BLIT_FS      : サムネイル用シンプルblit
+
+   ── パフォーマンス注意点 ────────────────────────────────────
+   4x(9440×6560): R8=62MB/layer, mipmap12段=重い
+   → ミップ生成はストローク終了後のみ (上記①)
+   updateThumbs: readPixels 4.6KB (34×34) レイヤーパネル時のみ
+   captureNow  : readPixels CW*CH bytes → packBits 8x圧縮保存
+
+   ── UI構造 ──────────────────────────────────────────────────
+   右端タブ    : PEN/MARK/ERASE/LAYER → rpanel展開
+   左ボタン    : FLIP/ERASER/SELECT (ドラッグ移動可)
+   水色ドット  : タブグループ位置ドラッグ
+   サブパレット: #sub-palette (6slot, ドラッグ移動, 最小化)
+   パネル自動閉: ペンがキャンバスに触れて1200ms後
+   ロングプレス: 95ms → ツールパネル展開
+
+   ── 変更ログ ────────────────────────────────────────────────
+   v19.0  WebGL2エンジン, R8レイヤー, ビューポートシェーダー
+   v19.1  COMP_FS Yフリップ修正
+   v19.2  commitTransform: tmpTex経由でアルファ保持
+   v19.3  bbox専用R8操作 (execLasso/commit, フリーズ解消)
+   v19.4  NEAREST mag + LINEAR_MIPMAP_LINEAR min + binary brush
+   v19.5  Catmull-Rom補間, 2本指回転, localStorage保存,
+          サブパレット, パネル自動閉, mipmap分離(freeze修正)
+================================================================ */
 'use strict';
 // ════════════════════════════════════════════════════════════
 //  BinaryPaint v19.5 — Memory-Optimized WebGL2 Architecture
@@ -273,7 +388,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 
 // ── State ──────────────────────────────────────────────────
 let CW=2360,CH=1640;
-let view={x:0,y:0,scale:1};
+let view={x:0,y:0,scale:1,rot:0};
 let flipState=false;
 let bgColor='#ffffff';
 let bgRGB=[1,1,1];
@@ -312,13 +427,24 @@ function calcD(f,isFirst){
   return Math.max(bMin,Math.min(bSize,Math.round(bMin+(bSize-bMin)*Math.pow((p-bThresh)/(1-bThresh+1e-9),bCurve))))|0;
 }
 
-// ── Coords (flip-aware) ────────────────────────────────────
+// ── Coords (flip+rotation aware) ───────────────────────────
 function screenToCanvas(sx,sy){
-  let fx=sx;if(flipState){const vcx=view.x+CW*view.scale/2;fx=2*vcx-sx;}
-  return{x:(fx-view.x)/view.scale,y:(sy-view.y)/view.scale};
+  // Apply flip first
+  if(flipState){const vcx=view.x+CW*view.scale/2;sx=2*vcx-sx;}
+  // Canvas center in screen space
+  const ccx=view.x+CW*view.scale/2,ccy=view.y+CH*view.scale/2;
+  // Translate to center-relative, unrotate, unscale
+  const dx=sx-ccx,dy=sy-ccy;
+  const cos=Math.cos(-view.rot),sin=Math.sin(-view.rot);
+  return{x:(dx*cos-dy*sin)/view.scale+CW/2,y:(dx*sin+dy*cos)/view.scale+CH/2};
 }
 function canvasToScreen(cx,cy){
-  const sp={x:cx*view.scale+view.x,y:cy*view.scale+view.y};
+  // Canvas-relative → rotate → scale → translate to screen
+  const dx=cx-CW/2,dy=cy-CH/2;
+  const cos=Math.cos(view.rot),sin=Math.sin(view.rot);
+  const rx=dx*cos-dy*sin,ry=dx*sin+dy*cos;
+  const ccx=view.x+CW*view.scale/2,ccy=view.y+CH*view.scale/2;
+  const sp={x:rx*view.scale+ccx,y:ry*view.scale+ccy};
   if(flipState){const vcx=view.x+CW*view.scale/2;sp.x=2*vcx-sp.x;}
   return sp;
 }
@@ -377,12 +503,20 @@ uniform vec2 u_canvas;
 uniform vec2 u_vxy;
 uniform float u_vscale;
 uniform bool u_flip;
+uniform float u_vrot;
 out vec4 o;
 void main(){
   float su = u_flip ? 1.0-v_uv.x : v_uv.x;
   float sv = v_uv.y;
   float css_x = su * u_screen.x;
   float css_y = (1.0-sv) * u_screen.y;
+  // Rotate around canvas center in screen space
+  float ccx = u_vxy.x + u_canvas.x * 0.5 * u_vscale;
+  float ccy = u_vxy.y + u_canvas.y * 0.5 * u_vscale;
+  float dx = css_x - ccx, dy = css_y - ccy;
+  float cosR = cos(-u_vrot), sinR = sin(-u_vrot);
+  css_x = dx*cosR - dy*sinR + ccx;
+  css_y = dx*sinR + dy*cosR + ccy;
   float cx = (css_x - u_vxy.x) / u_vscale;
   float cy = (css_y - u_vxy.y) / u_vscale;
   float tu = cx / u_canvas.x;
@@ -399,10 +533,6 @@ void main(){
     return;
   }
   vec3 base = u_first ? u_bg : texture(u_base, v_uv).rgb;
-  // R8 texture contains ONLY 0.0 or 1.0 (binary).
-  // At zoom-in: MAG=NEAREST → ink_r is exactly 0 or 1 (crisp, no bleed).
-  // At zoom-out: MIN=LINEAR_MIPMAP_LINEAR → ink_r = pixel density (0..1).
-  // No threshold, no pow() — use ink_r directly as ink coverage.
   float ink_r = texture(u_layer, vec2(tu, tv)).r;
   float ink = ink_r * u_opacity;
   vec3 rgb;
@@ -450,10 +580,10 @@ let gLayers=[],gActiveIdx=0;
 function makeR8Texture(w,h){
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,w,h,0,gl.RED,gl.UNSIGNED_BYTE,null);
-  // MAG=NEAREST: zoom-in shows crisp binary pixels, zero bleed between ink/empty.
-  // MIN=LINEAR_MIPMAP_LINEAR: zoom-out averages pixel density correctly via mipmaps.
-  // Texture contains ONLY 0 or 255 — mipmaps give correct gray density at zoom-out.
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+  // MAG=NEAREST: zoom-in shows crisp binary pixels, ZERO bleed between 0 and 255 neighbors.
+  //   LINEAR MAG was blending 255/0 border pixels → gray semi-transparent stroke edges.
+  // MIN=LINEAR: zoom-out averages binary texels → correct ink density, no mipmaps needed.
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
@@ -525,25 +655,16 @@ function flushBrush(){
   gl.uniform1f(ul(PROG.brush,'u_val'),eraserOn?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
-  // Schedule mipmap regen via rAF — batched, non-blocking
-  scheduleMipmap(layer);
   scheduleDraw();
+  // NOTE: mipmap regen moved to finishStroke() — NOT here.
+  // Calling generateMipmap every touchmove (12 mip levels × 4x canvas) caused 3-10s freezes.
 }
 
-// ── Mipmap dirty set: batch all regen into single rAF ─────────
-const _mipmapDirty=new Set();let _mipmapPending=false;
-function scheduleMipmap(layer){
-  _mipmapDirty.add(layer);
-  if(!_mipmapPending){_mipmapPending=true;requestAnimationFrame(()=>{
-    _mipmapPending=false;
-    for(const l of _mipmapDirty){
-      gl.bindTexture(gl.TEXTURE_2D,l.tex);
-      gl.generateMipmap(gl.TEXTURE_2D);
-    }
-    _mipmapDirty.clear();
-    gl.bindTexture(gl.TEXTURE_2D,null);
-  });}
-}
+// ── Mipmap dirty set: batch regen once after stroke ends ───────
+// NEVER called during active stroke (touchmove). Only called from:
+//   finishStroke(), restoreSnap(), writeR8Bbox(), file open
+// scheduleMipmap: no-op — texture uses LINEAR (not LINEAR_MIPMAP_LINEAR), no mipmaps needed.
+function scheduleMipmap(layer){} // intentionally empty
 function queueDot(x,y,d){
   if(instCount>=MAX_INST)flushBrush();
   instArr[instCount*3]=x;instArr[instCount*3+1]=y;instArr[instCount*3+2]=d/2;instCount++;
@@ -565,7 +686,7 @@ let drawScheduled=false;
 function scheduleDraw(){if(!drawScheduled){drawScheduled=true;requestAnimationFrame(compositeAndDisplay);}}
 function markDirty(){scheduleDraw();}
 
-function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst){
+function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst,vrot){
   gl.useProgram(p);
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,layerTex);gl.uniform1i(ul(p,'u_layer'),0);
   gl.uniform3fv(ul(p,'u_color'),color);
@@ -579,6 +700,7 @@ function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst){
   gl.uniform2f(ul(p,'u_vxy'),view.x,view.y);
   gl.uniform1f(ul(p,'u_vscale'),view.scale);
   gl.uniform1i(ul(p,'u_flip'),flipState?1:0);
+  gl.uniform1f(ul(p,'u_vrot'),vrot!==undefined?vrot:view.rot);
 }
 
 function compositeAndDisplay(){
@@ -616,22 +738,51 @@ function compositeAndDisplay(){
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);
 }
 
-// ── Draw API ────────────────────────────────────────────────
+// ── Draw API — Catmull-Rom, no double-draw ghost ────────────
+// Only emit segment p1→p2 when p3 is known (1-segment lag).
+// Never redraw a segment, so no semi-transparent ghost strokes.
+let _crBuf=[];
 function beginStroke(sx,sy,f){
-  stabClear();const pt=stabAdd(screenToCanvas(sx,sy)),d=calcD(f,true);
-  if(d>0){queueDot(pt.x,pt.y,d);flushBrush();}lastDrawPt=pt;
+  stabClear();_crBuf=[];
+  const pt=stabAdd(screenToCanvas(sx,sy)),d=calcD(f,true);
+  _crBuf.push({...pt,d});
+  if(d>0){queueDot(pt.x,pt.y,d);flushBrush();}
+  lastDrawPt={...pt};
 }
 function continueStroke(sx,sy,f){
-  const pt=stabAdd(screenToCanvas(sx,sy)),d=calcD(f,false);
-  if(d>0){
-    if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,pt.x,pt.y,d);
-    else queueDot(pt.x,pt.y,d);
-    lastDrawPt=pt;flushBrush();
-  }else lastDrawPt=pt;
+  const pt=stabAdd(screenToCanvas(sx,sy));
+  const d=Math.max(1,calcD(f,false));
+  _crBuf.push({...pt,d});
+  const n=_crBuf.length;
+  if(n<4)return; // need 4 pts to confirm p1→p2 segment
+  const p0=_crBuf[n-4],p1=_crBuf[n-3],p2=_crBuf[n-2],p3=_crBuf[n-1];
+  const dist=Math.hypot(p2.x-p1.x,p2.y-p1.y);
+  const step=Math.max(0.4,p1.d/3);
+  const segs=Math.max(1,Math.ceil(dist/step));
+  for(let i=1;i<=segs;i++){
+    const t=i/segs,t2=t*t,t3=t2*t;
+    const x=0.5*((2*p1.x)+(-p0.x+p2.x)*t+(2*p0.x-5*p1.x+4*p2.x-p3.x)*t2+(-p0.x+3*p1.x-3*p2.x+p3.x)*t3);
+    const y=0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
+    if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,x,y,p1.d);
+    else queueDot(x,y,p1.d);
+    lastDrawPt={x,y};
+  }
+  flushBrush();
 }
 function finishStroke(){
-  if(instCount>0)flushBrush();lastDrawPt=null;stabClear();
+  const n=_crBuf.length;
+  if(n>=2){
+    const start=Math.max(1,n-3);
+    for(let i=start;i<n;i++){
+      const p=_crBuf[i];
+      if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,p.x,p.y,p.d);
+      lastDrawPt={x:p.x,y:p.y};
+    }
+  }
+  if(instCount>0)flushBrush();
+  lastDrawPt=null;stabClear();_crBuf=[];
 }
+
 
 // ════════════════════════════════════════════════════════════
 //  UNDO — drawing pixels only, per-stroke, non-blocking
@@ -700,7 +851,7 @@ function restoreSnap(snap){
     const r8=unpackBits(s.bits,n);
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-    scheduleMipmap(l);
+    
   });
   scheduleDraw();
   if(openPanel==='layers')updateThumbs();
@@ -767,6 +918,7 @@ function updateThumbs(){
     gl.uniform2f(ul(PROG.comp,'u_vxy'),thumbOx,thumbOy);
     gl.uniform1f(ul(PROG.comp,'u_vscale'),thumbScale);
     gl.uniform1i(ul(PROG.comp,'u_flip'),0);
+    gl.uniform1f(ul(PROG.comp,'u_vrot'),0); // thumbs never rotated
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     // Read tiny 34×34 RGBA (4.6KB)
@@ -785,22 +937,91 @@ function updateThumbs(){
 // ── View ────────────────────────────────────────────────────
 function fitView(){
   const sw=window.innerWidth,sh=window.innerHeight;
-  view.scale=Math.min(sw/CW,sh/CH)*.88;view.x=(sw-CW*view.scale)/2;view.y=(sh-CH*view.scale)/2;
+  // 実寸表示: キャンバス1px = デバイス1CSSピクセル (scale=1.0)
+  // キャンバスがスクリーンより大きければ収まるよう縮小
+  const maxFit=Math.min(sw/CW,sh/CH);
+  view.scale=Math.min(1.0,maxFit); // 1.0 = 実寸、大きいキャンバスは収まる最大倍率
+  view.x=(sw-CW*view.scale)/2;
+  view.y=(sh-CH*view.scale)/2;
+  view.rot=0;
   applyView();
 }
+// 起動時は常に実寸センター表示 (保存されたビュー位置は無視)
+function resetView(){
+  const sw=window.innerWidth,sh=window.innerHeight;
+  const maxFit=Math.min(sw/CW,sh/CH);
+  view.scale=Math.min(1.0,maxFit);
+  view.x=(sw-CW*view.scale)/2;
+  view.y=(sh-CH*view.scale)/2;
+  view.rot=0;
+  flipState=false;
+  document.getElementById('flip-btn').style.background='rgba(56,217,217,.15)';
+  applyView();
+  showToast('実寸 ('+Math.round(view.scale*100)+'%) センター');
+}
 function applyView(){
-  // #cw transform is kept only for visual reference (left buttons positioning).
-  // Actual rendering uses view.x/y/scale directly via WebGL shader uniforms.
-  const cw=document.getElementById('cw'),{x,y,scale}=view;
-  if(flipState){const cx=CW/2;cw.style.transform=`translate(${x}px,${y}px) scale(${scale}) translate(${cx}px,0) scaleX(-1) translate(${-cx}px,0)`;}
-  else cw.style.transform=`translate(${x}px,${y}px) scale(${scale})`;
-  // DO NOT set #paper width/height — a 9440px DOM element prevents iOS Safari
-  // from applying CSS transforms below a certain scale, causing the zoom limit bug.
-  document.getElementById('zl').textContent=Math.round(scale*100)+'%';
+  const cw=document.getElementById('cw'),{x,y,scale,rot}=view;
+  const ccx=x+CW*scale/2,ccy=y+CH*scale/2;
+  let t=`translate(${ccx}px,${ccy}px) rotate(${rot}rad) scale(${scale}) translate(${-CW/2}px,${-CH/2}px)`;
+  if(flipState) t=`translate(${ccx}px,${ccy}px) scaleX(-1) rotate(${rot}rad) scale(${scale}) translate(${-CW/2}px,${-CH/2}px)`;
+  cw.style.transform=t;
+  document.getElementById('zl').textContent=Math.round(scale*100)+'%'+(rot!==0?' '+Math.round(rot*180/Math.PI)+'°':'');
   scheduleDraw();
+  // saveState() intentionally NOT called here — applyView fires 60fps during pan/zoom.
+  // saveState is called on finger touchend instead (see finger nav touchend handler).
 }
 
-// ── Cursor ──────────────────────────────────────────────────
+// ── Persistence (localStorage) ─────────────────────────────
+const LS_KEY='binarypaint_state';
+let _saveTimer=null;
+function saveState(){
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(()=>{
+    try{
+      const state={
+        tools:JSON.parse(JSON.stringify(TOOLS)),
+        activeTool,eraserOn,erbMode,eSize,bgColor,
+        view:{x:view.x,y:view.y,scale:view.scale,rot:view.rot},
+        flipState,
+        leftBtns:{
+          flip:document.getElementById('flip-btn').style.top,
+          erb:document.getElementById('erb').style.top,
+          sel:document.getElementById('sel-btn').style.top,
+        },
+        tabDotY:document.getElementById('rpanel-group').style.top,
+        subPalettePos:spPos,subPaletteMin:spMinimized,
+        subSlots:spSlots,subActiveSlot:spActiveSlot,
+      };
+      localStorage.setItem(LS_KEY,JSON.stringify(state));
+    }catch(e){}
+  },500);
+}
+function loadState(){
+  try{
+    const raw=localStorage.getItem(LS_KEY);if(!raw)return false;
+    const s=JSON.parse(raw);
+    if(s.tools){Object.assign(TOOLS,s.tools);}
+    if(s.activeTool)activeTool=s.activeTool;
+    loadToolState(activeTool);
+    if(s.eraserOn!==undefined)eraserOn=s.eraserOn;
+    if(s.erbMode)erbMode=s.erbMode;
+    if(s.eSize)eSize=s.eSize;
+    if(s.bgColor)applyBg(s.bgColor);
+    if(s.view)Object.assign(view,s.view);
+    if(s.flipState!==undefined)flipState=s.flipState;
+    if(s.leftBtns){
+      if(s.leftBtns.flip)document.getElementById('flip-btn').style.top=s.leftBtns.flip;
+      if(s.leftBtns.erb)document.getElementById('erb').style.top=s.leftBtns.erb;
+      if(s.leftBtns.sel)document.getElementById('sel-btn').style.top=s.leftBtns.sel;
+    }
+    if(s.tabDotY)document.getElementById('rpanel-group').style.top=s.tabDotY;
+    if(s.subPalettePos)spPos={...spPos,...s.subPalettePos};
+    if(s.subPaletteMin!==undefined)spMinimized=s.subPaletteMin;
+    if(s.subSlots)spSlots=s.subSlots;
+    if(s.subActiveSlot!==undefined)spActiveSlot=s.subActiveSlot;
+    return true;
+  }catch(e){return false;}
+}
 const prc=document.getElementById('prc');
 function updPRC(x,y,f){
   prc.style.display='block';prc.style.left=x+'px';prc.style.top=y+'px';
@@ -813,7 +1034,7 @@ function updPRC(x,y,f){
 //  SELECTION TOOL
 // ════════════════════════════════════════════════════════════
 let selState=null,lassoPath=[],origLassoPath=[];
-let selBBox=null,selImg=null,selTx=null,selHandle=null,selPrevPt=null,meshPts=null;
+let selBBox=null,selImg=null,selOrig=null,selTx=null,selHandle=null,selPrevPt=null,meshPts=null;
 const selOv=document.getElementById('sel-ov'),sovCtx=selOv.getContext('2d');
 function resizeSelOv(){selOv.width=window.innerWidth;selOv.height=window.innerHeight;}resizeSelOv();
 const selHintEl=document.getElementById('sel-hint');
@@ -908,7 +1129,6 @@ function canvasBboxToR8(canvasEl,bw,bh,existing_r8buf){
 function execLasso(){
   const l=gLayers[gActiveIdx];
   if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
-  setTimeout(captureNow,0);
   const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
   let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
   let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
@@ -917,6 +1137,10 @@ function execLasso(){
 
   // Read ONLY the bounding box (bw*bh bytes, not CW*CH bytes)
   const r8box=readR8Bbox(l.fbo,bx,by,bw,bh);
+  // Store a copy for undo — selOrig lets us cancel without corruption
+  const r8boxCopy=new Uint8Array(r8box);
+  selOrig={r8:r8boxCopy,bx,by,bw,bh,layerId:l.id};
+
   // Convert bbox to small RGBA canvas
   const bboxCanvas=r8BboxToCanvas(r8box,bw,bh,l.color);
 
@@ -942,14 +1166,17 @@ function execLasso(){
   }
   writeR8Bbox(l.tex,bx,by,bw,bh,r8erased);
 
-  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
+  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');
+  // Capture undo AFTER erasing (so undo restores erased state, not original)
+  setTimeout(captureNow,0);
+  scheduleDraw();
 }
 
 function commitTransform(){
   if(!selImg||!selBBox||!selTx)return;
   const l=gLayers[gActiveIdx];if(!l)return;
 
-  // Compute output bounding box from all mesh warp points
+  // Compute warped output bounding box
   let wxMin=Infinity,wxMax=-Infinity,wyMin=Infinity,wyMax=-Infinity;
   for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
     const p=meshPtW(r,c);
@@ -960,28 +1187,39 @@ function commitTransform(){
   const obw=Math.min(CW-obx,Math.ceil(wxMax)-obx+2),obh=Math.min(CH-oby,Math.ceil(wyMax)-oby+2);
   if(obw<1||obh<1){commitCleanup();return;}
 
-  // Render warp to a small canvas at output bbox size
-  // Offset mesh coordinates to bbox-local coords
-  const warpC=document.createElement('canvas');warpC.width=obw;warpC.height=obh;const wctx=warpC.getContext('2d');
-  drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,(r,c)=>{const p=meshPtW(r,c);return{x:p.x-obx,y:p.y-oby};});
+  try{
+    // Render warp into a small canvas (only bbox size — not full canvas)
+    const warpC=document.createElement('canvas');
+    warpC.width=obw;warpC.height=obh;
+    const wctx=warpC.getContext('2d',{willReadFrequently:true});
+    if(!wctx)throw new Error('canvas context unavailable');
+    drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,
+      (r,c)=>{const p=meshPtW(r,c);return{x:p.x-obx,y:p.y-oby};});
+    const warpId=wctx.getImageData(0,0,obw,obh);
 
-  // Read current layer at output bbox (small read)
-  const r8cur=readR8Bbox(l.fbo,obx,oby,obw,obh);
-  const curCanvas=r8BboxToCanvas(r8cur,obw,obh,l.color);
+    // Read current layer at output bbox (small GPU read, not full canvas)
+    const r8cur=readR8Bbox(l.fbo,obx,oby,obw,obh);
 
-  // Merge: layer + warp on top
-  const mergeC=document.createElement('canvas');mergeC.width=obw;mergeC.height=obh;const mctx=mergeC.getContext('2d');
-  mctx.drawImage(curCanvas,0,0);
-  mctx.drawImage(warpC,0,0);
-
-  // Convert back to R8 and upload only the output bbox
-  const r8new=canvasBboxToR8(mergeC,obw,obh,null);
-  writeR8Bbox(l.tex,obx,oby,obw,obh,r8new);
+    // Merge directly in R8 arrays — avoids large RGBA canvas allocations
+    // that fail under memory pressure and produce white-out
+    const r8new=new Uint8Array(obw*obh);
+    for(let row=0;row<obh;row++){
+      const fboRow=obh-1-row; // canvas→FBO y-flip
+      for(let col=0;col<obw;col++){
+        const wink=warpId.data[(row*obw+col)*4+3]>127?255:0;
+        r8new[fboRow*obw+col]=wink||r8cur[fboRow*obw+col];
+      }
+    }
+    writeR8Bbox(l.tex,obx,oby,obw,obh,r8new);
+  }catch(e){
+    showToast('変形失敗（メモリ不足）');
+    commitCleanup();scheduleDraw();return;
+  }
 
   commitCleanup();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
 }
 function commitCleanup(){
-  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
+  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
   document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
 }
 const SEAM=0.8;
@@ -1013,7 +1251,15 @@ function setSelState(s){
   else setSelHint(null);drawSelOv();
 }
 function cancelSel(){
-  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
+  // Restore erased pixels if selection was in progress
+  if(selOrig){
+    const l=gLayers.find(x=>x.id===selOrig.layerId);
+    if(l){
+      writeR8Bbox(l.tex,selOrig.bx,selOrig.by,selOrig.bw,selOrig.bh,selOrig.r8);
+      scheduleDraw();
+    }
+  }
+  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
   document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
 }
 function drawSelOv(){
@@ -1046,12 +1292,26 @@ function isStylusT(t){return t.touchType==='stylus';}
 function getStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return list[i];return null;}
 const TAB_MAP={'tab-br':'brush','tab-mk':'marker','tab-er':'eraser','tab-ly':'layers','tab-dot':null};
 function getTabAtPoint(x,y){const el=document.elementFromPoint(x,y);if(!el)return null;const tab=el.closest('[id^="tab-"]');if(!tab)return null;return TAB_MAP.hasOwnProperty(tab.id)?tab.id:null;}
-function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#bg-wrap,#sz-btn,#sv-btn,#open-btn'))return'ui';return'canvas';}
+function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette'))return'ui';if(el.closest('#bg-wrap,#sz-btn,#sv-btn,#open-btn'))return'ui';return'canvas';}
 
 document.addEventListener('touchstart',function(e){
   const st=getStylusT(e.changedTouches);if(!st)return;
   const tabId=getTabAtPoint(st.clientX,st.clientY);
-  if(tabId!==null){e.preventDefault();const pn=TAB_MAP[tabId];if(pn)openPanelFn(pn);return;}
+  if(tabId!==null){
+    e.preventDefault();
+    const pn=TAB_MAP[tabId];if(!pn)return;
+    if(TOOL_TABS.has(tabId)){
+      // Pen/Marker tab: hold=panel, tap=switch tool
+      let th=setTimeout(()=>{th=null;openPanelFn(pn);},TAB_HOLD_MS);
+      const done=()=>{if(th){clearTimeout(th);th=null;tabSwitchTool(pn);}};
+      document.addEventListener('touchend',done,{once:true,passive:true});
+      document.addEventListener('touchcancel',()=>{if(th){clearTimeout(th);th=null;}},{once:true,passive:true});
+    }else{
+      // Eraser/Layer: immediate
+      openPanelFn(pn);
+    }
+    return;
+  }
   const tgt=classifyPenTarget(st.clientX,st.clientY);
   if(tgt==='panel')return;
   if(tgt==='ui'){closePanel();return;}
@@ -1062,7 +1322,10 @@ document.addEventListener('touchstart',function(e){
   penId=st.identifier;
   if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
   if(selState==='transform'){const h=hitHandle(st.clientX,st.clientY);if(h){selHandle=h;selPrevPt={x:st.clientX,y:st.clientY};return;}}
-  updPRC(st.clientX,st.clientY,st.force);beginStroke(st.clientX,st.clientY,st.force);
+  updPRC(st.clientX,st.clientY,st.force);
+  // Start timer to auto-close tool panel once pen is on canvas
+  schedulePanelAutoClose();
+  beginStroke(st.clientX,st.clientY,st.force);
 },{passive:false,capture:true});
 
 document.addEventListener('touchmove',function(e){
@@ -1094,14 +1357,78 @@ document.addEventListener('touchcancel',function(e){
   }
 },{passive:false,capture:true});
 
-// ── Finger nav ─────────────────────────────────────────────
+// ── Finger nav (pan + pinch-zoom + two-finger rotation) ─────
 function hasStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return true;return false;}
 function isNativeEl(el){if(!el)return false;if(['INPUT','BUTTON','LABEL'].includes(el.tagName))return true;if(el.closest)return el.closest('.toppanel,.topbtn,#bg-wrap,#erb,#sel-btn,#flip-btn,#tab-dot')!==null;return false;}
-function rebuildNav(){const fp=[...ftouches.values()];if(!fp.length){panBase=null;pinchBase=null;}else if(fp.length===1){panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;}else{const[a,b]=fp;pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};panBase=null;}}
-document.addEventListener('touchstart',function(e){if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();const prev=ftouches.size;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];ftouches.set(t.identifier,{x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t:Date.now()});}maxFC=Math.max(maxFC,ftouches.size);if(prev===0){fMoved=false;gStart=Date.now();}rebuildNav();},{passive:false,capture:false});
-document.addEventListener('touchmove',function(e){if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i],p=ftouches.get(t.identifier);if(!p)continue;if(Math.abs(t.clientX-p.sx)>6||Math.abs(t.clientY-p.sy)>6)fMoved=true;ftouches.set(t.identifier,{...p,x:t.clientX,y:t.clientY});}const fp=[...ftouches.values()];if(fp.length===1&&panBase){view.x=panBase.vx+(fp[0].x-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();}else if(fp.length>=2&&pinchBase){const[a,b]=fp,dist=Math.hypot(b.x-a.x,b.y-a.y),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;const minS=Math.min(screenW/CW,screenH/CH)*0.1;const ns=Math.max(minS,Math.min(14,pinchBase.scale*dist/pinchBase.dist)),f=ns/pinchBase.scale;view.scale=ns;view.x=(pinchBase.vx-pinchBase.mx)*f+mx;view.y=(pinchBase.vy-pinchBase.my)*f+my;applyView();}if(selState==='transform')drawSelOv();},{passive:false,capture:false});
-document.addEventListener('touchend',function(e){if(hasStylusT(e.touches))return;for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);const fp=[...ftouches.values()];if(!fp.length){const el=Date.now()-gStart;if(!fMoved&&el<350){if(maxFC>=3)redo();else if(maxFC===2)undo();}maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}else rebuildNav();},{passive:false,capture:false});
-document.addEventListener('touchcancel',function(e){for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);if(!ftouches.size){maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}},{passive:false,capture:false});
+function rebuildNav(){
+  const fp=[...ftouches.values()];
+  if(!fp.length){panBase=null;pinchBase=null;}
+  else if(fp.length===1){
+    panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;
+  }else{
+    const[a,b]=fp;
+    const angle=Math.atan2(b.y-a.y,b.x-a.x);
+    pinchBase={
+      dist:Math.hypot(b.x-a.x,b.y-a.y),
+      scale:view.scale,rot:view.rot,angle,
+      vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2
+    };panBase=null;
+  }
+}
+document.addEventListener('touchstart',function(e){
+  if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();
+  const prev=ftouches.size;
+  for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];ftouches.set(t.identifier,{x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t:Date.now()});}
+  maxFC=Math.max(maxFC,ftouches.size);if(prev===0){fMoved=false;gStart=Date.now();}rebuildNav();
+},{passive:false,capture:false});
+document.addEventListener('touchmove',function(e){
+  if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();
+  for(let i=0;i<e.changedTouches.length;i++){
+    const t=e.changedTouches[i],p=ftouches.get(t.identifier);if(!p)continue;
+    if(Math.abs(t.clientX-p.sx)>6||Math.abs(t.clientY-p.sy)>6)fMoved=true;
+    ftouches.set(t.identifier,{...p,x:t.clientX,y:t.clientY});
+  }
+  const fp=[...ftouches.values()];
+  if(fp.length===1&&panBase){
+    view.x=panBase.vx+(fp[0].x-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();
+  }else if(fp.length>=2&&pinchBase){
+    const[a,b]=fp;
+    const dist=Math.hypot(b.x-a.x,b.y-a.y);
+    const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
+    const angle=Math.atan2(b.y-a.y,b.x-a.x);
+    const dAngle=angle-pinchBase.angle;
+    const minS=Math.min(screenW/CW,screenH/CH)*0.1;
+    const ns=Math.max(minS,Math.min(14,pinchBase.scale*dist/pinchBase.dist));
+    const f=ns/pinchBase.scale;
+    // Rotate and scale around pinch midpoint
+    const dx=pinchBase.vx+CW*pinchBase.scale/2-pinchBase.mx;
+    const dy=pinchBase.vy+CH*pinchBase.scale/2-pinchBase.my;
+    const cos=Math.cos(dAngle),sin=Math.sin(dAngle);
+    const rx=dx*cos-dy*sin,ry=dx*sin+dy*cos;
+    view.scale=ns;
+    view.rot=pinchBase.rot+dAngle;
+    view.x=mx+rx*f-CW*ns/2;
+    view.y=my+ry*f-CH*ns/2;
+    applyView();
+  }
+  if(selState==='transform')drawSelOv();
+},{passive:false,capture:false});
+document.addEventListener('touchend',function(e){
+  if(hasStylusT(e.touches))return;
+  for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);
+  const fp=[...ftouches.values()];
+  if(!fp.length){
+    const el=Date.now()-gStart;
+    if(!fMoved&&el<350){if(maxFC>=3)redo();else if(maxFC===2)undo();}
+    maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;
+    // Save view position/scale/rot once gesture is fully complete
+    saveState();
+  }else rebuildNav();
+},{passive:false,capture:false});
+document.addEventListener('touchcancel',function(e){
+  for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);
+  if(!ftouches.size){maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}
+},{passive:false,capture:false});
 
 // ════════════════════════════════════════════════════════════
 //  BUTTONS (draggable circles)
@@ -1143,6 +1470,7 @@ const bgInput=document.getElementById('bg-input'),bgSwatch=document.getElementBy
 function applyBg(hex){bgColor=hex;bgSwatch.style.background=hex;bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid rgba(0,0,0,.18)':'none';bgRGB=hexToRGB01(hex);scheduleDraw();}
 applyBg('#ffffff');
 bgInput.addEventListener('input',e=>applyBg(e.target.value));bgInput.addEventListener('change',e=>applyBg(e.target.value));
+document.getElementById('reset-view-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();resetView();});
 
 const rpg=document.getElementById('rpanel-group'),tabDot=document.getElementById('tab-dot');
 let tdY=window.innerHeight*.35,tdPD=false,tdDSY=0,tdDBY=0;
@@ -1154,13 +1482,156 @@ tabDot.addEventListener('touchcancel',function(){tdPD=false;},{passive:false});
 
 const PANELS={brush:'br-panel',marker:'mk-panel',eraser:'er-panel',layers:'ly-panel'};
 const TABS  ={brush:'tab-br',  marker:'tab-mk',  eraser:'tab-er',  layers:'tab-ly'};
-function openPanelFn(id){if(openPanel===id){closePanel();return;}closePanel(false);openPanel=id;if(PANELS[id])document.getElementById(PANELS[id]).classList.add('open');if(TABS[id])document.getElementById(TABS[id]).classList.add('act');rpg.classList.add('shifted');if(id==='layers')renderLayers();if(id==='brush'&&activeTool!=='pen')switchTool('pen');if(id==='marker'&&activeTool!=='marker')switchTool('marker');}
-function closePanel(r=true){Object.values(PANELS).forEach(p=>document.getElementById(p).classList.remove('open'));Object.values(TABS).forEach(t=>document.getElementById(t).classList.remove('act'));rpg.classList.remove('shifted');if(r)openPanel=null;}
-Object.entries(TAB_MAP).forEach(([tabId,panelName])=>{if(!panelName)return;const el=document.getElementById(tabId);if(!el)return;el.addEventListener('pointerdown',function(e){if(e.pointerType==='pen')return;e.preventDefault();e.stopPropagation();openPanelFn(panelName);},{passive:false});});
+let _panelAutoCloseTimer=null;
+function openPanelFn(id){
+  clearTimeout(_panelAutoCloseTimer);
+  if(openPanel===id){closePanel();return;}
+  closePanel(false);openPanel=id;
+  if(PANELS[id])document.getElementById(PANELS[id]).classList.add('open');
+  if(TABS[id])document.getElementById(TABS[id]).classList.add('act');
+  rpg.classList.add('shifted');
+  // Only rebuild layer list when pen is NOT drawing (avoid DOM thrash during stroke)
+  if(id==='layers'&&penId===null)renderLayers();
+  if(id==='brush'&&activeTool!=='pen')switchTool('pen');
+  if(id==='marker'&&activeTool!=='marker')switchTool('marker');
+}
+function closePanel(r=true){
+  clearTimeout(_panelAutoCloseTimer);
+  Object.values(PANELS).forEach(p=>document.getElementById(p).classList.remove('open'));
+  Object.values(TABS).forEach(t=>document.getElementById(t).classList.remove('act'));
+  rpg.classList.remove('shifted');if(r)openPanel=null;
+}
+// Auto-close panel when pen starts drawing on canvas (1200ms grace after leaving panel bounds)
+function schedulePanelAutoClose(){
+  clearTimeout(_panelAutoCloseTimer);
+  if(openPanel&&openPanel!=='layers'){
+    _panelAutoCloseTimer=setTimeout(()=>{
+      if(openPanel&&openPanel!=='layers')closePanel();
+    },1200);
+  }
+}
+
+// ── Tab interaction ──────────────────────────────────────────
+const TAB_HOLD_MS=95; // 1/4 of original 380ms
+const TOOL_TABS=new Set(['tab-br','tab-mk']);
+
+function tabSwitchTool(panelName){
+  // Switch active tool without opening panel
+  if(panelName==='brush'){
+    switchTool('pen');
+    document.querySelectorAll('.rtab').forEach(t=>t.classList.remove('act'));
+    document.getElementById('tab-br').classList.add('act');
+    showToast('ペン');
+  }else if(panelName==='marker'){
+    switchTool('marker');
+    document.querySelectorAll('.rtab').forEach(t=>t.classList.remove('act'));
+    document.getElementById('tab-mk').classList.add('act');
+    showToast('マーカー');
+  }
+}
+
+Object.entries(TAB_MAP).forEach(([tabId,panelName])=>{
+  if(!panelName)return;
+  const el=document.getElementById(tabId);if(!el)return;
+  let holdTimer=null;
+
+  if(TOOL_TABS.has(tabId)){
+    // Pen/Marker: hold=open panel, quick tap=switch tool
+    el.addEventListener('pointerdown',function(e){
+      if(e.pointerType==='pen')return;
+      e.preventDefault();e.stopPropagation();
+      holdTimer=setTimeout(()=>{holdTimer=null;openPanelFn(panelName);},TAB_HOLD_MS);
+    },{passive:false});
+    el.addEventListener('pointermove',function(e){
+      // Cancel hold if finger moves significantly (drag gesture started)
+      if(holdTimer&&(Math.abs(e.movementX)>4||Math.abs(e.movementY)>4)){
+        clearTimeout(holdTimer);holdTimer=null;
+        if(openPanel==='brush'||openPanel==='marker')closePanel();
+      }
+    },{passive:true});
+    el.addEventListener('pointerup',function(e){
+      if(holdTimer){clearTimeout(holdTimer);holdTimer=null;
+        // Quick tap: switch tool, close any open tool panel
+        tabSwitchTool(panelName);
+        if(openPanel==='brush'||openPanel==='marker')closePanel();
+      }
+    },{passive:false});
+    el.addEventListener('pointercancel',function(){
+      if(holdTimer){clearTimeout(holdTimer);holdTimer=null;}
+    },{passive:false});
+  }else{
+    // Eraser/Layer: immediate open on tap
+    el.addEventListener('pointerdown',function(e){
+      if(e.pointerType==='pen')return;
+      e.preventDefault();e.stopPropagation();
+      openPanelFn(panelName);
+    },{passive:false});
+  }
+});
 document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;const szp=document.getElementById('sz-panel'),svp=document.getElementById('sv-panel');if(!szp.contains(e.target)&&e.target!==document.getElementById('sz-btn'))szp.classList.remove('open');if(!svp.contains(e.target)&&e.target!==document.getElementById('sv-btn'))svp.classList.remove('open');},{passive:true,capture:false});
 
-// ════════════════════════════════════════════════════════════
-//  INERTIA SLIDER / LAYER UI
+// ── Tab→Slot drag: drag tab icon onto sub-palette slot to save ──
+// Works for PEN, MARKER, ERASER tabs (finger touch drag)
+(function setupTabDrag(){
+  const dragSources=[
+    {tabId:'tab-br', getType:()=>'pen'},
+    {tabId:'tab-mk', getType:()=>'marker'},
+    {tabId:'tab-er', getType:()=>'eraser'},
+  ];
+  let _dragging=false,_dragType=null;
+
+  function slotAtPoint(x,y){
+    const el=document.elementFromPoint(x,y);
+    if(!el)return null;
+    const slot=el.closest('.sp-slot');
+    return slot?+slot.dataset.slot:null;
+  }
+  function clearDragOver(){document.querySelectorAll('.sp-slot.drag-over').forEach(s=>s.classList.remove('drag-over'));}
+
+  dragSources.forEach(({tabId,getType})=>{
+    const tab=document.getElementById(tabId);if(!tab)return;
+    let _startX=0,_startY=0;
+    tab.addEventListener('touchstart',e=>{
+      _dragging=false;_dragType=null;
+      _startX=e.touches[0].clientX;_startY=e.touches[0].clientY;
+    },{passive:true});
+    tab.addEventListener('touchmove',e=>{
+      const t=e.touches[0];
+      if(!_dragging){
+        const dx=Math.abs(t.clientX-_startX),dy=Math.abs(t.clientY-_startY);
+        if(dx>8||dy>8){
+          _dragging=true;_dragType=getType();
+          // Close any open panel immediately when drag begins
+          if(openPanel)closePanel();
+        }
+      }
+      if(_dragging){
+        clearDragOver();
+        const idx=slotAtPoint(t.clientX,t.clientY);
+        if(idx!==null){
+          const slot=document.querySelector(`.sp-slot[data-slot="${idx}"]`);
+          if(slot)slot.classList.add('drag-over');
+        }
+      }
+    },{passive:true});
+    tab.addEventListener('touchend',e=>{
+      if(_dragging&&_dragType){
+        clearDragOver();
+        const t=e.changedTouches[0];
+        const idx=slotAtPoint(t.clientX,t.clientY);
+        if(idx!==null){
+          const prevTool=activeTool,prevEraser=eraserOn;
+          if(_dragType==='eraser'){eraserOn=true;}
+          else{eraserOn=false;if(activeTool!==_dragType)switchTool(_dragType);}
+          spSaveCurrentTool(idx);
+          eraserOn=prevEraser;
+          if(activeTool!==prevTool)switchTool(prevTool);
+        }
+        _dragging=false;_dragType=null;
+      }
+    },{passive:true});
+  });
+})();
 // ════════════════════════════════════════════════════════════
 function initCsl(id,init,cb){
   const el=document.getElementById(id);if(!el)return;
@@ -1277,7 +1748,7 @@ document.getElementById('file-input').addEventListener('change',function(){
     const r8=new Uint8Array(CW*CH);
     for(let row=0;row<CH;row++){const fboRow=CH-1-row;for(let col=0;col<CW;col++)r8[fboRow*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
     gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-    gl.bindTexture(gl.TEXTURE_2D,null);scheduleMipmap(l);
+    gl.bindTexture(gl.TEXTURE_2D,null);
     scheduleDraw();setTimeout(captureNow,0);showToast('画像を読み込みました');
   };img.src=ev.target.result;};reader.readAsDataURL(file);this.value='';
 });
@@ -1331,8 +1802,316 @@ document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
 });
 
 // ════════════════════════════════════════════════════════════
-//  CURVE / STAB PREVIEW
+//  PSD EXPORT — Adobe PSD v1 format
+//  Spec: https://www.adobe.com/devnet-apps/photoshop/fileformatashtml/
+//  Produces: multi-layer PSD with transparency preserved per layer.
+//  Each layer stored as RGBA (ink color + alpha channel).
+//  Background: optional filled layer at bottom.
 // ════════════════════════════════════════════════════════════
+
+function writePSD(layers,cw,ch,bgColorHex){
+  // ── Helpers ──
+  function u8(v){return v&0xff;}
+  function u16be(v){return[(v>>8)&0xff,v&0xff];}
+  function u32be(v){return[(v>>24)&0xff,(v>>16)&0xff,(v>>8)&0xff,v&0xff];}
+  function str(s){return s.split('').map(c=>c.charCodeAt(0));}
+  function pad2(b){if(b.length%2)b.push(0);}
+  function pad4(b){while(b.length%4)b.push(0);}
+
+  // RLE compress a single channel row (PackBits)
+  function packBitsRow(row){
+    const out=[],n=row.length;let i=0;
+    while(i<n){
+      let run=1;
+      while(run<128&&i+run<n&&row[i+run]===row[i])run++;
+      if(run>1){out.push(u8(-(run-1)+256));out.push(row[i]);i+=run;continue;}
+      let lit=1;
+      while(lit<128&&i+lit<n&&(lit<2||(row[i+lit-1]!==row[i+lit-2]||row[i+lit]!==row[i+lit-1])))lit++;
+      out.push(u8(lit-1));for(let j=0;j<lit;j++)out.push(row[i+j]);i+=lit;
+    }
+    return out;
+  }
+
+  // Read all layer pixel data from WebGL FBOs
+  // Returns array of {r8data, color, opacity, blend, name, visible}
+  const layerData=layers.map(l=>{
+    const r8=new Uint8Array(cw*ch);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+    gl.readPixels(0,0,cw,ch,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    return{r8,color:l.color,opacity:l.opacity,blend:l.blend,name:l.name,visible:l.visible};
+  });
+
+  // ── Section 1: File Header ──
+  const header=[
+    ...str('8BPS'),           // signature
+    ...u16be(1),               // version 1 = PSD (not PSB)
+    0,0,0,0,0,0,               // reserved
+    ...u16be(4),               // channels: RGBA
+    ...u32be(ch),              // height
+    ...u32be(cw),              // width
+    ...u16be(8),               // bit depth
+    ...u16be(3),               // color mode: RGB
+  ];
+
+  // ── Section 2: Color Mode Data (empty for RGB) ──
+  const colorMode=[...u32be(0)];
+
+  // ── Section 3: Image Resources (minimal) ──
+  const imgRes=[...u32be(0)];
+
+  // ── Section 4: Layer and Mask Info ──
+  // PSD blend mode keys
+  const blendKeys={normal:'norm',multiply:'mul ',overlay:'over'};
+
+  // Build each layer record
+  function buildLayerRecord(ld,idx){
+    const[ir,ig,ib]=ld.color.map(v=>Math.round(v*255));
+    const name=ld.name||('Layer '+(idx+1));
+    const nameBytes=[...str(name)];
+    // Layer name: pascal string (1 byte length + chars, padded to 2)
+    const pascal=[nameBytes.length,...nameBytes];pad2(pascal);
+    // Additional layer info: Unicode name ('luni')
+    const uniNameChars=[];for(const c of name)uniNameChars.push(...u16be(c.charCodeAt(0)));
+    const luniData=[...u32be(uniNameChars.length/2),...uniNameChars];
+    pad4(luniData);
+    const luniBlock=[...str('8BIM'),...str('luni'),...u32be(luniData.length),...luniData];
+    // Additional layer info: section divider placeholder
+    const addInfo=[...luniBlock];
+    const rec=[
+      ...u32be(0),u32be(0),u32be(ch),u32be(cw), // bounding box (top=0,left=0,bottom=ch,right=cw)
+      ...u16be(4),               // number of channels: 4 (R,G,B,A)
+      // channel info: id, length (placeholder 0, filled later)
+      ...u16be(0xffff),...u32be(0), // alpha
+      ...u16be(0),...u32be(0),       // R
+      ...u16be(1),...u32be(0),       // G
+      ...u16be(2),...u32be(0),       // B
+      ...str('8BIM'),
+      ...str(blendKeys[ld.blend]||'norm'),
+      u8(Math.round(ld.opacity*255)), // opacity
+      u8(0),                          // clipping: base
+      u8(ld.visible?0:2),             // flags: 2=not visible
+      u8(0),                          // filler
+      ...u32be(pascal.length+addInfo.length+4),...pascal,...addInfo,
+    ];
+    return rec;
+  }
+
+  // Build compressed channel data for one layer
+  function buildChannelData(ld){
+    const[ir,ig,ib]=ld.color.map(v=>Math.round(v*255));
+    // Build 4 channels: A, R, G, B (order matches channel info above)
+    const channels=[[],[],[],[]]; // A,R,G,B
+    for(let fboRow=0;fboRow<ch;fboRow++){
+      const canvasRow=ch-1-fboRow; // flip Y
+      const rowA=[],rowR=[],rowG=[],rowB=[];
+      for(let col=0;col<cw;col++){
+        const on=ld.r8[fboRow*cw+col]>127;
+        rowA.push(on?255:0);
+        rowR.push(on?ir:0);rowG.push(on?ig:0);rowB.push(on?ib:0);
+      }
+      channels[0].push(rowA);channels[1].push(rowR);channels[2].push(rowG);channels[3].push(rowB);
+    }
+    // RLE compress each channel (compression=1)
+    const out=[];
+    for(const chan of channels){
+      // Per-channel compression flag (u16 = 1 = RLE)
+      out.push(...u16be(1));
+      // Row byte counts (2 bytes per row per channel)
+      const rows=chan.map(r=>packBitsRow(r));
+      for(const r of rows)out.push(...u16be(r.length));
+      // Packed data
+      for(const r of rows)out.push(...r);
+    }
+    return out;
+  }
+
+  // ── Assemble Layer Info ──
+  const numLayers=layerData.length;
+  const layerRecords=layerData.map((ld,i)=>buildLayerRecord(ld,i));
+  const channelDatas=layerData.map(ld=>buildChannelData(ld));
+
+  // Layer records section
+  let layerRecordsFlat=[];
+  layerRecordsFlat.push(...u16be(numLayers)); // positive = has merged alpha
+  for(const r of layerRecords)layerRecordsFlat.push(...r);
+  pad2(layerRecordsFlat);
+
+  // Channel data section (after records)
+  let chanDataFlat=[];
+  for(const cd of channelDatas)chanDataFlat.push(...cd);
+
+  // Layer info = records + channel data
+  const layerInfo=[...layerRecordsFlat,...chanDataFlat];
+  pad2(layerInfo);
+
+  // Global mask info (empty)
+  const globalMask=[];
+
+  // Layer and mask section
+  const lmLen=4+layerInfo.length+4+globalMask.length;
+  const layerMask=[...u32be(lmLen),...u32be(layerInfo.length),...layerInfo,...u32be(globalMask.length),...globalMask];
+
+  // ── Section 5: Merged Image Data (flattened composite, RLE) ──
+  const flatR=new Uint8Array(cw*ch),flatG=new Uint8Array(cw*ch),flatB=new Uint8Array(cw*ch);
+  const bg=hexToRGB01(bgColorHex||'#ffffff').map(v=>Math.round(v*255));
+  flatR.fill(bg[0]);flatG.fill(bg[1]);flatB.fill(bg[2]);
+  for(const ld of layerData){
+    if(!ld.visible)continue;
+    const[ir,ig,ib]=ld.color.map(v=>Math.round(v*255));
+    for(let fboRow=0;fboRow<ch;fboRow++){
+      const canvasRow=ch-1-fboRow;
+      for(let col=0;col<cw;col++){
+        const on=ld.r8[fboRow*cw+col]>127;
+        if(on){const i=canvasRow*cw+col;flatR[i]=ir;flatG[i]=ig;flatB[i]=ib;}
+      }
+    }
+  }
+  function compressFlat(data){
+    const rows=[];
+    for(let row=0;row<ch;row++)rows.push(packBitsRow(Array.from(data.subarray(row*cw,(row+1)*cw))));
+    const out=[...u16be(1)]; // RLE compression flag
+    for(const r of rows)out.push(...u16be(r.length));
+    for(const r of rows)out.push(...r);
+    return out;
+  }
+  const imageData=[...compressFlat(flatR),...compressFlat(flatG),...compressFlat(flatB)];
+
+  // ── Assemble final file ──
+  const psd=new Uint8Array([...header,...colorMode,...imgRes,...layerMask,...imageData]);
+  return psd;
+}
+
+document.getElementById('sv-psd').addEventListener('pointerdown',async e=>{
+  e.preventDefault();e.stopPropagation();
+  document.getElementById('sv-panel').classList.remove('open');
+  if(CW>=9440){showToast('4xはPSD非対応（メモリ不足）');return;}
+  showToast('PSD生成中…');
+  await new Promise(r=>setTimeout(r,60));
+  try{
+    // Read all layer R8 data from GPU
+    const layersData=[];
+    for(const l of gLayers){
+      const r8=new Uint8Array(CW*CH);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+      gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      layersData.push({r8,color:[...l.color],opacity:l.opacity,
+        name:l.name||'Layer',blend:l.blend,visible:l.visible});
+      await new Promise(r=>setTimeout(r,0));
+    }
+    const psd=buildPSD(layersData);
+    const blob=new Blob([psd],{type:'application/octet-stream'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=reiwaFn()+'.psd';
+    document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);
+    showToast('PSD ダウンロード完了');
+  }catch(err){showToast('PSD失敗: '+err.message);}
+});
+
+// ════════════════════════════════════════════════════════════
+//  PSD WRITER — binary Photoshop format
+//  Spec: Adobe Photoshop File Formats (version 6.0)
+//  - Each layer = RGBA8 (A = R8 ink, RGB = layer color)
+//  - Merged image = composite of all layers over bgColor
+//  - RAW (uncompressed) channel data, big-endian
+// ════════════════════════════════════════════════════════════
+function buildPSD(layersData){
+  const W=CW,H=CH,NL=layersData.length;
+  const blk=b=>b==='multiply'?'mul ':b==='overlay'?'over':'norm';
+  // Pascal string padded to 4-byte boundary
+  function pstr(s){
+    s=(s||'').slice(0,255);
+    const b=[s.length];
+    for(let i=0;i<s.length;i++)b.push(s.charCodeAt(i)&0xFF);
+    while(b.length%4)b.push(0);return b;
+  }
+  // Precompute per-layer RGBA channels (Y-flipped from WebGL to PSD order)
+  const lpix=layersData.map(ld=>{
+    const ir=Math.round(ld.color[0]*255),ig=Math.round(ld.color[1]*255),ib=Math.round(ld.color[2]*255);
+    const n=W*H;
+    const a=new Uint8Array(n),r=new Uint8Array(n),g=new Uint8Array(n),b=new Uint8Array(n);
+    for(let row=0;row<H;row++){
+      const src=H-1-row; // WebGL y-flip
+      for(let col=0;col<W;col++){
+        const i=row*W+col,ink=ld.r8[src*W+col];
+        a[i]=ink;if(ink){r[i]=ir;g[i]=ig;b[i]=ib;}
+      }
+    }
+    return[a,r,g,b]; // channel order: alpha(-1), R(0), G(1), B(2)
+  });
+  // Merged composite (RGB, no transparency — composited over background)
+  const n=W*H;
+  const bgr=Math.round(bgRGB[0]*255),bgg=Math.round(bgRGB[1]*255),bgb=Math.round(bgRGB[2]*255);
+  const mR=new Uint8Array(n).fill(bgr),mG=new Uint8Array(n).fill(bgg),mB=new Uint8Array(n).fill(bgb);
+  layersData.forEach((ld,li)=>{
+    if(!ld.visible)return;
+    const op=ld.opacity;
+    const[al,rc,gc,bc]=lpix[li];
+    for(let i=0;i<n;i++){
+      const aa=(al[i]/255)*op;if(!aa)continue;
+      mR[i]=mR[i]*(1-aa)+rc[i]*aa|0;
+      mG[i]=mG[i]*(1-aa)+gc[i]*aa|0;
+      mB[i]=mB[i]*(1-aa)+bc[i]*aa|0;
+    }
+  });
+  // Size calculations
+  const chanLen=2+n; // RAW: 2B compression type + n bytes data
+  const pnames=layersData.map(ld=>pstr(ld.name));
+  const totalRec=pnames.reduce((s,pn)=>s+66+pn.length,0);
+  const totalChan=NL*4*chanLen;
+  const liBodyLen=2+totalRec+totalChan; // 2B layer count + records + chan data
+  const liPad=liBodyLen+(liBodyLen&1);  // round up to even
+  const lmiLen=4+liPad+4;              // 4B layer-info-len + padded body + 4B global-mask-len
+  const totalSize=26+4+4+4+lmiLen+2+3*n;
+  // Write bytes
+  const out=new Uint8Array(totalSize);let p=0;
+  const w8=v=>out[p++]=v&0xFF;
+  const w16=v=>{w8(v>>8);w8(v);};
+  const w16s=v=>w16(v<0?v+0x10000:v);
+  const w32=v=>{w8(v>>>24);w8(v>>>16&255);w8(v>>>8&255);w8(v&255);};
+  const ws=s=>{for(let i=0;i<s.length;i++)w8(s.charCodeAt(i));};
+  const wb=a=>{out.set(a,p);p+=a.length;};
+  // File header (26 bytes)
+  ws('8BPS');w16(1);p+=6;   // signature, version=1, 6 reserved bytes
+  w16(3);w32(H);w32(W);w16(8);w16(3); // channels=3(RGB), H, W, depth=8, colormode=3(RGB)
+  w32(0); // color mode data section: length=0
+  w32(0); // image resources section: length=0
+  // Layer and Mask Info section
+  w32(lmiLen);      // section length (bytes following this field)
+  w32(liPad);       // layer info length (padded to even)
+  w16s(NL);         // layer count (positive = no merged alpha in first layer)
+  // Layer records
+  layersData.forEach((ld,li)=>{
+    w32(0);w32(0);w32(H);w32(W); // bounding rect: top=0,left=0,bottom=H,right=W
+    w16(4);                        // 4 channels: alpha, R, G, B
+    w16s(-1);w32(chanLen);         // alpha channel id=-1
+    w16(0);w32(chanLen);           // R channel id=0
+    w16(1);w32(chanLen);           // G channel id=1
+    w16(2);w32(chanLen);           // B channel id=2
+    ws('8BIM');ws(blk(ld.blend)); // blend mode
+    w8(Math.round(ld.opacity*255)); // opacity 0-255
+    w8(0);                          // clipping: base (0)
+    w8(ld.visible?0:2);             // flags: bit1=hidden
+    w8(0);                          // filler
+    const pn=pnames[li];
+    w32(8+pn.length);               // extra data length: 4(mask)+4(blend)+name
+    w32(0);                          // layer mask data length=0
+    w32(0);                          // layer blending ranges length=0
+    wb(pn);                          // pascal name
+  });
+  // Channel image data (for each layer, each channel: compression + data)
+  layersData.forEach((_,li)=>{
+    lpix[li].forEach(ch=>{w16(0);wb(ch);}); // compression=0 (RAW), then pixel data
+  });
+  if(liBodyLen&1)w8(0); // pad layer info to even byte count
+  w32(0); // global mask info length=0
+  // Merged image data (RAW, 3 channels: R, G, B planes)
+  w16(0);wb(mR);wb(mG);wb(mB);
+  if(p!==totalSize)throw new Error(`PSD size error: wrote ${p}, expected ${totalSize}`);
+  return out;
+}
 function drawCurveOn(id,sz,mn,pressure,curve,thresh){
   const cv=document.getElementById(id);if(!cv)return;
   const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
@@ -1362,10 +2141,147 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 // ════════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════
+//  SUB-TOOL PALETTE
+//  6スロット (2行×3列): ペン/マーカー/消しゴムのプリセットを保存
+//  aquaドットをタップ→最小化/復元, ドラッグ→移動
+//  スロットをタップ→ツール切替, ペン/マーカータブからドロップ→保存
+// ════════════════════════════════════════════════════════════
+let spPos={x:16,y:200};
+let spMinimized=false;
+// Each slot: null or {type:'pen'|'marker'|'eraser', settings:{...}}
+let spSlots=Array(6).fill(null);
+
+const spEl=document.getElementById('sub-palette');
+const spBody=document.getElementById('sp-body');
+const spMinBtn=document.getElementById('sp-min-btn');
+const spDot=document.getElementById('sp-dot');
+
+let spActiveSlot=-1; // index of last activated slot (-1 = none)
+
+function spRender(){
+  spEl.style.left=spPos.x+'px';spEl.style.top=spPos.y+'px';
+  spEl.classList.toggle('minimized',spMinimized);
+  spMinBtn.textContent=spMinimized?'＋':'—';
+  if(spMinimized)return;
+  document.querySelectorAll('.sp-slot').forEach((slot,i)=>{
+    const s=spSlots[i];
+    const icon=slot.querySelector('.sp-slot-icon');
+    const label=slot.querySelector('.sp-slot-label');
+    const sz=slot.querySelector('.sp-slot-sz')||(()=>{const d=document.createElement('span');d.className='sp-slot-sz';slot.appendChild(d);return d;})();
+    // Only the single last-activated slot gets active-tool highlight
+    slot.classList.toggle('has-tool',!!s);
+    slot.classList.toggle('active-tool',i===spActiveSlot&&!!s);
+    if(s){
+      icon.textContent=s.type==='pen'?'✏':s.type==='marker'?'✒':'⊘';
+      label.textContent=s.type==='pen'?'ペン':s.type==='marker'?'マーカー':'消しゴム';
+      sz.textContent=s.settings.sz?s.settings.sz+'px':'';
+    }else{
+      icon.textContent='＋';label.textContent='空き';sz.textContent='';
+    }
+  });
+}
+
+function spSaveCurrentTool(slotIdx){
+  const type=eraserOn?'eraser':activeTool;
+  if(type==='pen'||type==='marker'){
+    const t=TOOLS[type==='pen'?'pen':'marker'];
+    spSlots[slotIdx]={type,settings:{sz:t.sz,min:t.min,pressure:t.pressure,curve:t.curve,thresh:t.thresh,stab:t.stab}};
+  }else if(type==='eraser'){
+    spSlots[slotIdx]={type:'eraser',settings:{sz:eSize}};
+  }
+  spRender();saveState();showToast('スロット'+(slotIdx+1)+'に保存 (長押し)');
+}
+
+function spActivateTool(slotIdx){
+  const s=spSlots[slotIdx];if(!s)return;
+  spActiveSlot=slotIdx;
+  if(s.type==='eraser'){
+    eraserOn=true;eSize=s.settings.sz||eSize;
+    document.getElementById('erb').classList.add('on');
+    document.getElementById('badge').classList.add('show');
+    showToast('消しゴム ('+eSize+'px)');
+  }else{
+    eraserOn=false;document.getElementById('erb').classList.remove('on');document.getElementById('badge').classList.remove('show');
+    const tool=s.type;
+    Object.assign(TOOLS[tool],s.settings);
+    switchTool(tool);
+    bSize=s.settings.sz;bMin=s.settings.min;bPressure=s.settings.pressure;
+    bCurve=s.settings.curve;bThresh=s.settings.thresh;stabLen=s.settings.stab;
+    showToast((tool==='pen'?'ペン':'マーカー')+' '+s.settings.sz+'px');
+  }
+  spRender();
+}
+
+// Slot interaction: pointerdown/up (not touch) avoids conflict with palette drag handlers.
+// Short press (<500ms) = activate tool; long press (≥500ms) = save current tool to slot.
+document.querySelectorAll('.sp-slot').forEach(slot=>{
+  let pressT=0,pressTimer=null;
+  const idx=+slot.dataset.slot;
+  slot.addEventListener('pointerdown',e=>{
+    e.stopPropagation();e.preventDefault();
+    pressT=Date.now();
+    pressTimer=setTimeout(()=>{pressTimer=null;spSaveCurrentTool(idx);},500);
+  },{passive:false});
+  slot.addEventListener('pointerup',e=>{
+    e.stopPropagation();
+    if(pressTimer){clearTimeout(pressTimer);pressTimer=null;
+      // Short tap: activate
+      spActivateTool(idx);
+    }
+    // if pressTimer already null → long press save already ran
+  },{passive:false});
+  slot.addEventListener('pointercancel',()=>{if(pressTimer){clearTimeout(pressTimer);pressTimer=null;}});
+});
+
+// Minimise button
+spMinBtn.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();spMinimized=!spMinimized;spRender();saveState();},{passive:false});
+// Dot tap also toggles minimise
+spDot.addEventListener('touchstart',e=>{spDot._t=Date.now();spDot._moved=false;},{passive:true});
+spDot.addEventListener('touchmove',()=>spDot._moved=true,{passive:true});
+spDot.addEventListener('touchend',e=>{if(!spDot._moved&&Date.now()-spDot._t<300){spMinimized=!spMinimized;spRender();saveState();}},{passive:true});
+
+// Header drag
+const spHeader=document.getElementById('sp-header');
+let spDrag=false,spDX=0,spDY=0;
+spHeader.addEventListener('touchstart',e=>{
+  e.preventDefault();e.stopPropagation(); // prevent canvas stroke on drag start
+  spDrag=true;const t=e.changedTouches[0];spDX=t.clientX-spPos.x;spDY=t.clientY-spPos.y;
+},{passive:false});
+spHeader.addEventListener('touchmove',e=>{
+  if(!spDrag)return;
+  e.preventDefault();e.stopPropagation();
+  const t=e.changedTouches[0];
+  spPos.x=Math.max(0,Math.min(screenW-100,t.clientX-spDX));
+  spPos.y=Math.max(60,Math.min(screenH-200,t.clientY-spDY));
+  spEl.style.left=spPos.x+'px';spEl.style.top=spPos.y+'px';
+},{passive:false});
+spHeader.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true});
+
+// Minimized body drag
+spBody.addEventListener('touchstart',e=>{
+  if(!spMinimized)return;
+  e.preventDefault();e.stopPropagation();
+  spDrag=true;const t=e.changedTouches[0];spDX=t.clientX-spPos.x;spDY=t.clientY-spPos.y;spDot._t=Date.now();spDot._moved=false;
+},{passive:false});
+spBody.addEventListener('touchmove',e=>{
+  if(!spDrag||!spMinimized)return;
+  e.preventDefault();e.stopPropagation();
+  spDot._moved=true;const t=e.changedTouches[0];
+  spPos.x=Math.max(0,Math.min(screenW-50,t.clientX-spDX));
+  spPos.y=Math.max(60,Math.min(screenH-50,t.clientY-spDY));
+  spEl.style.left=spPos.x+'px';spEl.style.top=spPos.y+'px';
+},{passive:false});
+spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true});
+
 (function init(){
   if(!initWebGL())return;
   addGLLayer('レイヤー 1','#000000');
-  fitView();scheduleDraw();setTimeout(captureNow,0);
+  // 設定は復元するがビュー位置は常に実寸センターに初期化
+  const hadState=loadState();
+  resetView(); // 起動時は必ずリセット（4x編集後に画面外へ行くのを防ぐ）
+  scheduleDraw();setTimeout(captureNow,0);
+  spRender();
 
   // Pen sliders
   initCsl('csl-sz',  12,v=>{TOOLS.pen.sz=v;if(activeTool==='pen')bSize=v;document.getElementById('v-sz').textContent=v+'px';drawCurveOn('curve-cv',TOOLS.pen.sz,TOOLS.pen.min,TOOLS.pen.pressure,TOOLS.pen.curve,TOOLS.pen.thresh);});
