@@ -18,12 +18,12 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-family:'Noto Sans JP',sans-serif}
 #app{position:relative;width:100vw;height:100vh;overflow:hidden;touch-action:none}
-/* gl-canvas: fixed fullscreen overlay — rendered at screen resolution regardless of canvas size */
-#gl-canvas{position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:1;pointer-events:none;image-rendering:pixelated}
-/* Paper: invisible reference for coordinate system / layout */
+/* gl-canvas: fixed fullscreen, size set by JS to exactly match window.innerWidth/innerHeight */
+#gl-canvas{position:fixed;top:0;left:0;z-index:1;pointer-events:none;image-rendering:pixelated}
+/* Paper: zero-size reference point — rendering is done by #gl-canvas, not DOM */
 #ca{position:absolute;inset:0;overflow:hidden;touch-action:none;z-index:0}
-#cw{position:absolute;transform-origin:0 0;will-change:transform}
-#paper{position:relative}
+#cw{position:absolute;transform-origin:0 0}
+#paper{position:absolute;width:0;height:0;overflow:visible}
 /* Selection overlay */
 #sel-ov{position:fixed;top:0;left:0;pointer-events:none;z-index:150}
 /* ── Top bar ── */
@@ -348,8 +348,11 @@ in vec2 v_uv;
 uniform float u_val; // 1.0=draw, 0.0=erase
 out float o;
 void main(){
-  if(length(v_uv-.5)*2.>1.) discard;
-  o=u_val;
+  // Hard binary circle: inside=write, outside=discard (no pixel written).
+  // No smoothstep/fwidth — those create intermediate gray values which
+  // cause bleed at zoom-in. This is a binary tool: only 0 or 1 in texture.
+  if(length(v_uv - 0.5) * 2.0 > 1.0) discard;
+  o = u_val;
 }`;
 
 // ── Viewport composite shader ───────────────────────────────
@@ -362,43 +365,46 @@ void main(){v_uv=a_pos*.5+.5;gl_Position=vec4(a_pos,0,1);}`;
 const COMP_FS=`#version 300 es
 precision highp float;
 in vec2 v_uv;
-// Layer being composited (R8: ink presence 0..1)
 uniform sampler2D u_layer;
-uniform vec3 u_color;    // ink color for this layer
+uniform vec3 u_color;
 uniform float u_opacity;
-uniform int u_blend;     // 0=normal 1=multiply 2=overlay
-// Base (result of previous layers, or u_bg if first)
+uniform int u_blend;
 uniform sampler2D u_base;
 uniform bool u_first;
 uniform vec3 u_bg;
-// Viewport mapping: screen UV → canvas texture UV
-uniform vec2 u_screen;  // screenW, screenH (CSS pixels)
-uniform vec2 u_canvas;  // CW, CH
-uniform vec2 u_vxy;     // view.x, view.y
-uniform float u_vscale; // view.scale
-uniform bool u_flip;    // horizontal flip display
+uniform vec2 u_screen;
+uniform vec2 u_canvas;
+uniform vec2 u_vxy;
+uniform float u_vscale;
+uniform bool u_flip;
 out vec4 o;
 void main(){
-  // Handle display flip
   float su = u_flip ? 1.0-v_uv.x : v_uv.x;
   float sv = v_uv.y;
-  // Screen UV → CSS pixel
   float css_x = su * u_screen.x;
-  float css_y = (1.0-sv) * u_screen.y;  // GL y-up to CSS y-down
-  // CSS pixel → canvas pixel
+  float css_y = (1.0-sv) * u_screen.y;
   float cx = (css_x - u_vxy.x) / u_vscale;
   float cy = (css_y - u_vxy.y) / u_vscale;
-  // Canvas pixel → texture UV
-  // Brush shader uses -clip.y, so canvas y=0(top) → tex v=1
   float tu = cx / u_canvas.x;
   float tv = 1.0 - cy / u_canvas.y;
-  // Base color
+  // Outside canvas: render dark app background
+  if(tu<0.0||tu>1.0||tv<0.0||tv>1.0){
+    o=vec4(0.067,0.067,0.075,1);
+    return;
+  }
+  // Canvas border: 2px screen-space
+  float bpx = 2.0 / u_vscale;
+  if(cx<bpx||cx>u_canvas.x-bpx||cy<bpx||cy>u_canvas.y-bpx){
+    o=vec4(0.45,0.45,0.45,1);
+    return;
+  }
   vec3 base = u_first ? u_bg : texture(u_base, v_uv).rgb;
-  // Sample layer (out of bounds → 0 ink)
-  float ink = 0.0;
-  if(tu>=0.0&&tu<=1.0&&tv>=0.0&&tv<=1.0)
-    ink = texture(u_layer, vec2(tu,tv)).r * u_opacity;
-  // Blend
+  // R8 texture contains ONLY 0.0 or 1.0 (binary).
+  // At zoom-in: MAG=NEAREST → ink_r is exactly 0 or 1 (crisp, no bleed).
+  // At zoom-out: MIN=LINEAR_MIPMAP_LINEAR → ink_r = pixel density (0..1).
+  // No threshold, no pow() — use ink_r directly as ink coverage.
+  float ink_r = texture(u_layer, vec2(tu, tv)).r;
+  float ink = ink_r * u_opacity;
   vec3 rgb;
   if(u_blend==1){rgb=mix(base,base*u_color,ink);}
   else if(u_blend==2){vec3 ov=mix(2.*base*u_color,1.-2.*(1.-base)*(1.-u_color),step(.5,base));rgb=mix(base,ov,ink);}
@@ -442,11 +448,13 @@ let compB_tex=null,compB_fbo=null;
 let gLayers=[],gActiveIdx=0;
 
 function makeR8Texture(w,h){
-  // R8: single red channel, 1 byte/pixel. 62MB at 9440×6560 vs 248MB for RGBA8.
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,w,h,0,gl.RED,gl.UNSIGNED_BYTE,null);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  // MAG=NEAREST: zoom-in shows crisp binary pixels, zero bleed between ink/empty.
+  // MIN=LINEAR_MIPMAP_LINEAR: zoom-out averages pixel density correctly via mipmaps.
+  // Texture contains ONLY 0 or 255 — mipmaps give correct gray density at zoom-out.
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
   return t;
@@ -471,6 +479,10 @@ function initWebGL(){
   const canvas=document.getElementById('gl-canvas');
   screenW=window.innerWidth;screenH=window.innerHeight;
   canvas.width=screenW;canvas.height=screenH;
+  // CRITICAL: set CSS size explicitly via JS, not 100vw/100vh.
+  // On iOS Safari, 100vh != window.innerHeight (browser chrome excluded).
+  // Mismatch would stretch the canvas and offset all stroke coordinates.
+  canvas.style.width=screenW+'px';canvas.style.height=screenH+'px';
   gl=canvas.getContext('webgl2',{alpha:false,antialias:false,premultipliedAlpha:false,preserveDrawingBuffer:true});
   if(!gl){showToast('WebGL2 非対応');return false;}
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
@@ -504,13 +516,18 @@ function flushBrush(){
   gl.bufferSubData(gl.ARRAY_BUFFER,0,instArr,0,instCount*3);
   gl.bindFramebuffer(gl.FRAMEBUFFER,layer.fbo);
   gl.viewport(0,0,CW,CH);
-  // R8 FBO: simple overwrite (no blending needed — write 1.0 draw, 0.0 erase)
+  // No blending: brush writes exactly 1.0 (draw) or 0.0 (erase).
+  // Pixels outside the circle are discarded by the shader (not written).
+  // This guarantees R8 texture contains ONLY 0 or 255 — never intermediate values.
   gl.disable(gl.BLEND);
   gl.useProgram(PROG.brush);
   gl.uniform2f(ul(PROG.brush,'u_res'),CW,CH);
   gl.uniform1f(ul(PROG.brush,'u_val'),eraserOn?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
+  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindTexture(gl.TEXTURE_2D,null);
   scheduleDraw();
 }
 function queueDot(x,y,d){
@@ -520,8 +537,9 @@ function queueDot(x,y,d){
 function queueLine(x0,y0,x1,y1,d){
   const dx=x1-x0,dy=y1-y0,dist=Math.sqrt(dx*dx+dy*dy);
   if(dist===0)return;
-  // Step = radius/2 for ≥50% overlap, ensures no gaps at any angle
-  const step=Math.max(0.5,d/2);
+  // Step = d/3 → 67% overlap → solid fill with NEAREST texture at all angles.
+  // (d/2 = edge-touching only; NEAREST can miss sub-pixel gaps at diagonal angles)
+  const step=Math.max(0.4,d/3);
   const n=Math.ceil(dist/step);
   for(let i=1;i<=n;i++){const t=i/n;queueDot(x0+dx*t,y0+dy*t,d);}
 }
@@ -658,6 +676,7 @@ function restoreSnap(snap){
     const r8=unpackBits(s.bits,n);
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.generateMipmap(gl.TEXTURE_2D);
   });
   scheduleDraw();updateThumbs();renderLayers();
 }
@@ -743,13 +762,15 @@ function fitView(){
   applyView();
 }
 function applyView(){
-  // #cw is invisible reference — just keep it for left-button positioning
+  // #cw transform is kept only for visual reference (left buttons positioning).
+  // Actual rendering uses view.x/y/scale directly via WebGL shader uniforms.
   const cw=document.getElementById('cw'),{x,y,scale}=view;
   if(flipState){const cx=CW/2;cw.style.transform=`translate(${x}px,${y}px) scale(${scale}) translate(${cx}px,0) scaleX(-1) translate(${-cx}px,0)`;}
   else cw.style.transform=`translate(${x}px,${y}px) scale(${scale})`;
-  document.getElementById('paper').style.width=CW+'px';document.getElementById('paper').style.height=CH+'px';
+  // DO NOT set #paper width/height — a 9440px DOM element prevents iOS Safari
+  // from applying CSS transforms below a certain scale, causing the zoom limit bug.
   document.getElementById('zl').textContent=Math.round(scale*100)+'%';
-  scheduleDraw(); // redraw with new viewport
+  scheduleDraw();
 }
 
 // ── Cursor ──────────────────────────────────────────────────
@@ -807,36 +828,133 @@ function applyHandle(h,psx,psy,csx,csy){
   drawSelOv();
 }
 // R8 ↔ RGBA conversion helpers for 2D canvas operations
-function r8ToRGBACanvas(r8,w,h,color){
-  // r8: Uint8Array(w*h), returns Canvas element with ink as colored pixels
-  // The r8 data from readPixels is stored bottom-up in WebGL convention
-  const tc=document.createElement('canvas');tc.width=w;tc.height=h;
-  const ctx=tc.getContext('2d');
-  const rgba=new Uint8ClampedArray(w*h*4);
-  const[ir,ig,ib]=[Math.round(color[0]*255),Math.round(color[1]*255),Math.round(color[2]*255)];
-  // Flip Y: r8 row 0 = canvas bottom, canvas row 0 = canvas top
-  for(let row=0;row<h;row++){
-    const srcRow=(h-1-row); // flip
-    for(let col=0;col<w;col++){
-      const on=r8[srcRow*w+col]>127;
-      const oi=(row*w+col)*4;
+// ── R8 bbox helpers ────────────────────────────────────────
+// Read only bounding box from R8 FBO (avoids 62MB full read at 4x).
+// Returns Uint8Array(bw*bh) in FBO order (y=0=bottom).
+function readR8Bbox(fbo,bx,by,bw,bh){
+  const fboY=CH-by-bh; // flip Y: FBO y=0 is canvas bottom
+  const buf=new Uint8Array(bw*bh);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,fbo);
+  gl.readPixels(bx,fboY,bw,bh,gl.RED,gl.UNSIGNED_BYTE,buf);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+  return buf;
+}
+// Write R8 data (FBO order) back to a bbox region of a texture.
+function writeR8Bbox(tex,bx,by,bw,bh,buf){
+  const fboY=CH-by-bh;
+  gl.bindTexture(gl.TEXTURE_2D,tex);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,bx,fboY,bw,bh,gl.RED,gl.UNSIGNED_BYTE,buf);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+}
+// Convert R8 bbox (FBO order) to small RGBA 2D canvas (canvas order, y=0=top).
+function r8BboxToCanvas(r8buf,bw,bh,color){
+  const[ir,ig,ib]=color.map(v=>Math.round(v*255));
+  const rgba=new Uint8ClampedArray(bw*bh*4);
+  for(let row=0;row<bh;row++){
+    const srcRow=bh-1-row; // FBO→canvas Y flip
+    for(let col=0;col<bw;col++){
+      const on=r8buf[srcRow*bw+col]>127;
+      const oi=(row*bw+col)*4;
       rgba[oi]=on?ir:0;rgba[oi+1]=on?ig:0;rgba[oi+2]=on?ib:0;rgba[oi+3]=on?255:0;
     }
   }
-  ctx.putImageData(new ImageData(rgba,w,h),0,0);return tc;
+  const tc=document.createElement('canvas');tc.width=bw;tc.height=bh;
+  tc.getContext('2d').putImageData(new ImageData(rgba,bw,bh),0,0);
+  return tc;
 }
-function canvasToR8(canvasEl,w,h){
-  // Convert 2D canvas alpha to R8 (flipped back for WebGL upload)
-  const ctx=canvasEl.getContext('2d');
-  const id=ctx.getImageData(0,0,w,h);
-  const r8=new Uint8Array(w*h);
-  for(let row=0;row<h;row++){
-    const dstRow=(h-1-row); // flip for WebGL
-    for(let col=0;col<w;col++){
-      r8[dstRow*w+col]=id.data[(row*w+col)*4+3]>127?255:0;
+// Convert small RGBA 2D canvas (canvas order) back to R8 bbox (FBO order).
+function canvasBboxToR8(canvasEl,bw,bh,existing_r8buf){
+  const id=canvasEl.getContext('2d').getImageData(0,0,bw,bh);
+  const buf=new Uint8Array(bw*bh);
+  for(let row=0;row<bh;row++){
+    const fboRow=bh-1-row; // canvas→FBO Y flip
+    for(let col=0;col<bw;col++){
+      const alpha=id.data[(row*bw+col)*4+3];
+      buf[fboRow*bw+col]=alpha>127?255:0;
     }
   }
-  return r8;
+  return buf;
+}
+
+function execLasso(){
+  const l=gLayers[gActiveIdx];
+  if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
+  captureNow();
+  const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
+  let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
+  let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
+  if(bw<4||bh<4){lassoPath=[];setSelState(null);showToast('選択範囲が小さすぎます');return;}
+  selBBox={x:bx,y:by,w:bw,h:bh};origLassoPath=[...lassoPath];
+
+  // Read ONLY the bounding box (bw*bh bytes, not CW*CH bytes)
+  const r8box=readR8Bbox(l.fbo,bx,by,bw,bh);
+  // Convert bbox to small RGBA canvas
+  const bboxCanvas=r8BboxToCanvas(r8box,bw,bh,l.color);
+
+  // Lasso mask (canvas order, bw*bh)
+  const mc=document.createElement('canvas');mc.width=bw;mc.height=bh;const mctx=mc.getContext('2d');
+  mctx.fillStyle='#fff';mctx.beginPath();
+  lassoPath.forEach((p,i)=>{i?mctx.lineTo(p.x-bx,p.y-by):mctx.moveTo(p.x-bx,p.y-by);});
+  mctx.closePath();mctx.fill();
+
+  // Extract selection: keep only inside lasso
+  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;const ectx=ec.getContext('2d');
+  ectx.drawImage(bboxCanvas,0,0);ectx.globalCompositeOperation='destination-in';ectx.drawImage(mc,0,0);selImg=ec;
+
+  // Erase inside lasso from r8box (FBO order)
+  const maskId=mc.getContext('2d').getImageData(0,0,bw,bh);
+  const r8erased=new Uint8Array(bw*bh);
+  for(let row=0;row<bh;row++){
+    const fboRow=bh-1-row;
+    for(let col=0;col<bw;col++){
+      const insideLasso=maskId.data[(row*bw+col)*4+3]>127;
+      r8erased[fboRow*bw+col]=insideLasso?0:r8box[fboRow*bw+col];
+    }
+  }
+  writeR8Bbox(l.tex,bx,by,bw,bh,r8erased);
+
+  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
+}
+
+function commitTransform(){
+  if(!selImg||!selBBox||!selTx)return;
+  const l=gLayers[gActiveIdx];if(!l)return;
+
+  // Compute output bounding box from all mesh warp points
+  let wxMin=Infinity,wxMax=-Infinity,wyMin=Infinity,wyMax=-Infinity;
+  for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
+    const p=meshPtW(r,c);
+    wxMin=Math.min(wxMin,p.x);wxMax=Math.max(wxMax,p.x);
+    wyMin=Math.min(wyMin,p.y);wyMax=Math.max(wyMax,p.y);
+  }
+  const obx=Math.max(0,Math.floor(wxMin)),oby=Math.max(0,Math.floor(wyMin));
+  const obw=Math.min(CW-obx,Math.ceil(wxMax)-obx+2),obh=Math.min(CH-oby,Math.ceil(wyMax)-oby+2);
+  if(obw<1||obh<1){commitCleanup();return;}
+
+  // Render warp to a small canvas at output bbox size
+  // Offset mesh coordinates to bbox-local coords
+  const warpC=document.createElement('canvas');warpC.width=obw;warpC.height=obh;const wctx=warpC.getContext('2d');
+  drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,(r,c)=>{const p=meshPtW(r,c);return{x:p.x-obx,y:p.y-oby};});
+
+  // Read current layer at output bbox (small read)
+  const r8cur=readR8Bbox(l.fbo,obx,oby,obw,obh);
+  const curCanvas=r8BboxToCanvas(r8cur,obw,obh,l.color);
+
+  // Merge: layer + warp on top
+  const mergeC=document.createElement('canvas');mergeC.width=obw;mergeC.height=obh;const mctx=mergeC.getContext('2d');
+  mctx.drawImage(curCanvas,0,0);
+  mctx.drawImage(warpC,0,0);
+
+  // Convert back to R8 and upload only the output bbox
+  const r8new=canvasBboxToR8(mergeC,obw,obh,null);
+  writeR8Bbox(l.tex,obx,oby,obw,obh,r8new);
+
+  commitCleanup();scheduleDraw();captureNow();showToast('変形確定');
+}
+function commitCleanup(){
+  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
+  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
 }
 const SEAM=0.8;
 function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
@@ -865,55 +983,6 @@ function setSelState(s){
   if(s==='lasso'){btn.classList.add('lasso');setSelHint('なげなわで範囲を描いてください');}
   else if(s==='transform'){btn.classList.add('transform');setSelHint('ハンドル/メッシュ点で変形 → 再タップで確定');}
   else setSelHint(null);drawSelOv();
-}
-function execLasso(){
-  const l=gLayers[gActiveIdx];
-  if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
-  captureNow();
-  const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
-  let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
-  let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
-  if(bw<4||bh<4){lassoPath=[];setSelState(null);showToast('選択範囲が小さすぎます');return;}
-  selBBox={x:bx,y:by,w:bw,h:bh};origLassoPath=[...lassoPath];
-  // Read R8 layer (use shared buf only if it fits; otherwise alloc temp)
-  const r8=new Uint8Array(CW*CH); // R8 is just CW*CH bytes
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-  gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-  // Convert to RGBA canvas for 2D operations
-  const fullCanvas=r8ToRGBACanvas(r8,CW,CH,l.color);
-  // Lasso mask
-  const mc=document.createElement('canvas');mc.width=bw;mc.height=bh;const mctx=mc.getContext('2d');
-  mctx.fillStyle='#fff';mctx.beginPath();
-  lassoPath.forEach((p,i)=>{i?mctx.lineTo(p.x-bx,p.y-by):mctx.moveTo(p.x-bx,p.y-by);});
-  mctx.closePath();mctx.fill();
-  // Extract selection
-  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;const ectx=ec.getContext('2d');
-  ectx.drawImage(mc,0,0);ectx.globalCompositeOperation='source-in';ectx.drawImage(fullCanvas,-bx,-by);selImg=ec;
-  // Erase selection from full canvas then upload back to R8
-  const fc2=document.createElement('canvas');fc2.width=CW;fc2.height=CH;const fc2ctx=fc2.getContext('2d');
-  fc2ctx.drawImage(fullCanvas,0,0);fc2ctx.globalCompositeOperation='destination-out';fc2ctx.drawImage(mc,bx,by);
-  const r8new=canvasToR8(fc2,CW,CH);
-  gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);
-  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
-}
-function commitTransform(){
-  if(!selImg||!selBBox||!selTx)return;
-  const l=gLayers[gActiveIdx];if(!l)return;
-  // Render warped selection
-  const warpC=document.createElement('canvas');warpC.width=CW;warpC.height=CH;const wctx=warpC.getContext('2d');
-  drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtW(r,c));
-  // Read current layer R8, convert to canvas, merge
-  const r8=new Uint8Array(CW*CH);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-  gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-  const layerC=r8ToRGBACanvas(r8,CW,CH,l.color);
-  const lctx=layerC.getContext('2d');lctx.drawImage(warpC,0,0);
-  const r8new=canvasToR8(layerC,CW,CH);
-  gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);
-  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
-  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();scheduleDraw();captureNow();showToast('変形確定');
 }
 function cancelSel(){
   selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
@@ -1002,7 +1071,7 @@ function hasStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))re
 function isNativeEl(el){if(!el)return false;if(['INPUT','BUTTON','LABEL'].includes(el.tagName))return true;if(el.closest)return el.closest('.toppanel,.topbtn,#bg-wrap,#erb,#sel-btn,#flip-btn,#tab-dot')!==null;return false;}
 function rebuildNav(){const fp=[...ftouches.values()];if(!fp.length){panBase=null;pinchBase=null;}else if(fp.length===1){panBase={px:fp[0].x,py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;}else{const[a,b]=fp;pinchBase={dist:Math.hypot(b.x-a.x,b.y-a.y),scale:view.scale,vx:view.x,vy:view.y,mx:(a.x+b.x)/2,my:(a.y+b.y)/2};panBase=null;}}
 document.addEventListener('touchstart',function(e){if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();const prev=ftouches.size;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];ftouches.set(t.identifier,{x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t:Date.now()});}maxFC=Math.max(maxFC,ftouches.size);if(prev===0){fMoved=false;gStart=Date.now();}rebuildNav();},{passive:false,capture:false});
-document.addEventListener('touchmove',function(e){if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i],p=ftouches.get(t.identifier);if(!p)continue;if(Math.abs(t.clientX-p.sx)>6||Math.abs(t.clientY-p.sy)>6)fMoved=true;ftouches.set(t.identifier,{...p,x:t.clientX,y:t.clientY});}const fp=[...ftouches.values()];if(fp.length===1&&panBase){view.x=panBase.vx+(fp[0].x-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();}else if(fp.length>=2&&pinchBase){const[a,b]=fp,dist=Math.hypot(b.x-a.x,b.y-a.y),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;const ns=Math.max(.04,Math.min(14,pinchBase.scale*dist/pinchBase.dist)),f=ns/pinchBase.scale;view.scale=ns;view.x=(pinchBase.vx-pinchBase.mx)*f+mx;view.y=(pinchBase.vy-pinchBase.my)*f+my;applyView();}if(selState==='transform')drawSelOv();},{passive:false,capture:false});
+document.addEventListener('touchmove',function(e){if(hasStylusT(e.touches))return;if(isNativeEl(e.target))return;e.preventDefault();for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i],p=ftouches.get(t.identifier);if(!p)continue;if(Math.abs(t.clientX-p.sx)>6||Math.abs(t.clientY-p.sy)>6)fMoved=true;ftouches.set(t.identifier,{...p,x:t.clientX,y:t.clientY});}const fp=[...ftouches.values()];if(fp.length===1&&panBase){view.x=panBase.vx+(fp[0].x-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();}else if(fp.length>=2&&pinchBase){const[a,b]=fp,dist=Math.hypot(b.x-a.x,b.y-a.y),mx=(a.x+b.x)/2,my=(a.y+b.y)/2;const minS=Math.min(screenW/CW,screenH/CH)*0.1;const ns=Math.max(minS,Math.min(14,pinchBase.scale*dist/pinchBase.dist)),f=ns/pinchBase.scale;view.scale=ns;view.x=(pinchBase.vx-pinchBase.mx)*f+mx;view.y=(pinchBase.vy-pinchBase.my)*f+my;applyView();}if(selState==='transform')drawSelOv();},{passive:false,capture:false});
 document.addEventListener('touchend',function(e){if(hasStylusT(e.touches))return;for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);const fp=[...ftouches.values()];if(!fp.length){const el=Date.now()-gStart;if(!fMoved&&el<350){if(maxFC>=3)redo();else if(maxFC===2)undo();}maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}else rebuildNav();},{passive:false,capture:false});
 document.addEventListener('touchcancel',function(e){for(let i=0;i<e.changedTouches.length;i++)ftouches.delete(e.changedTouches[i].identifier);if(!ftouches.size){maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}},{passive:false,capture:false});
 
@@ -1140,9 +1209,12 @@ document.getElementById('file-input').addEventListener('change',function(){
     const scale=Math.min(CW/img.width,CH/img.height),sw=Math.round(img.width*scale),sh=Math.round(img.height*scale),ox=Math.round((CW-sw)/2),oy=Math.round((CH-sh)/2);
     const tc=document.createElement('canvas');tc.width=CW;tc.height=CH;
     tc.getContext('2d').drawImage(img,ox,oy,sw,sh);
-    // Convert to R8 (keep only alpha channel)
-    const r8=canvasToR8(tc,CW,CH);
+    // Convert to R8: alpha>0 → ink, else empty (Y-flip for WebGL FBO)
+    const id=tc.getContext('2d').getImageData(0,0,CW,CH);
+    const r8=new Uint8Array(CW*CH);
+    for(let row=0;row<CH;row++){const fboRow=CH-1-row;for(let col=0;col<CW;col++)r8[fboRow*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
     gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.generateMipmap(gl.TEXTURE_2D);gl.bindTexture(gl.TEXTURE_2D,null);
     scheduleDraw();captureNow();showToast('画像を読み込みました');
   };img.src=ev.target.result;};reader.readAsDataURL(file);this.value='';
 });
@@ -1254,7 +1326,9 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
   drawStabOn('stab-cv',1);drawStabOn('mk-stab-cv',1);
   window.addEventListener('resize',()=>{
     screenW=window.innerWidth;screenH=window.innerHeight;
-    const canvas=document.getElementById('gl-canvas');canvas.width=screenW;canvas.height=screenH;
+    const canvas=document.getElementById('gl-canvas');
+    canvas.width=screenW;canvas.height=screenH;
+    canvas.style.width=screenW+'px';canvas.style.height=screenH+'px';
     // Resize screen-sized composite FBOs
     gl.deleteTexture(compA_tex);gl.deleteFramebuffer(compA_fbo);
     gl.deleteTexture(compB_tex);gl.deleteFramebuffer(compB_fbo);
