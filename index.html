@@ -894,12 +894,14 @@ async function captureNow(){
 function restoreSnap(snap){
   const n=CW*CH;
   snap.forEach(s=>{
-    // Match by layer id — robust to layer reorder
     const l=gLayers.find(x=>x.id===s.id);if(!l)return;
     const r8=unpackBits(s.bits,n);
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
-    
+    gl.bindTexture(gl.TEXTURE_2D,null);
+    // Must regenerate mipmaps immediately so the undo is visible in the viewport.
+    // Previously missing — caused undo to appear stale until next stroke.
+    scheduleMipmap(l);
   });
   scheduleDraw();
   if(openPanel==='layers')updateThumbs();
@@ -1084,19 +1086,12 @@ function updPRC(x,y,f){
 //  SELECTION TOOL
 // ════════════════════════════════════════════════════════════
 let selState=null,lassoPath=[],origLassoPath=[];
-let selBBox=null,selImg=null,selOrig=null,selTx=null,selHandle=null,selPrevPt=null,meshPts=null;
+let selBBox=null,selImg=null,selOrig=null,selTx=null,selHandle=null,selPrevPt=null;
 const selOv=document.getElementById('sel-ov'),sovCtx=selOv.getContext('2d');
 function resizeSelOv(){selOv.width=window.innerWidth;selOv.height=window.innerHeight;}resizeSelOv();
 const selHintEl=document.getElementById('sel-hint');
 function setSelHint(m){if(m){selHintEl.textContent=m;selHintEl.classList.add('show');}else selHintEl.classList.remove('show');}
-function initMesh(){meshPts=[];for(let r=0;r<=4;r++){meshPts.push([]);for(let c=0;c<=4;c++)meshPts[r].push({dx:0,dy:0});}}
-function meshPtW(r,c){
-  if(!selBBox||!selTx||!meshPts)return{x:0,y:0};
-  const{cx,cy,rot,sx,sy}=selTx,lx=(c/4-.5)*selBBox.w*sx,ly=(r/4-.5)*selBBox.h*sy;
-  const cos=Math.cos(rot),sin=Math.sin(rot);
-  return{x:cos*lx-sin*ly+cx+meshPts[r][c].dx,y:sin*lx+cos*ly+cy+meshPts[r][c].dy};
-}
-function meshPtS(r,c){const p=meshPtW(r,c);return canvasToScreen(p.x,p.y);}
+// Selection state — mesh warp removed, affine only (translate/rotate/scale)
 function getHandles(){
   if(!selTx||!selBBox)return{};
   const{cx,cy,rot,sx,sy}=selTx,hw=selBBox.w*sx/2,hh=selBBox.h*sy/2,cos=Math.cos(rot),sin=Math.sin(rot);
@@ -1107,7 +1102,7 @@ function hitHandle(sx,sy){
   if(selState!=='transform')return null;
   const H=getHandles(),R=24;
   for(const[n,p]of Object.entries(H)){const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'h:'+n;}
-  if(meshPts)for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){const sp=meshPtS(r,c),dx=sx-sp.x,dy=sy-sp.y;if(dx*dx+dy*dy<R*R)return`m:${r}:${c}`;}
+  // Mesh warp removed — only MOVE, scale (corners/edges), ROT
   if(selTx&&selBBox){
     const p=screenToCanvas(sx,sy),{cx,cy,rot,sx:ssx,sy:ssy}=selTx;
     const cos=Math.cos(-rot),sin=Math.sin(-rot),lx=cos*(p.x-cx)-sin*(p.y-cy),ly=sin*(p.x-cx)+cos*(p.y-cy);
@@ -1122,7 +1117,7 @@ function applyHandle(h,psx,psy,csx,csy){
   else if(/^h:(TL|TR|BL|BR)$/.test(h)){const pd=Math.hypot(pC.x-selTx.cx,pC.y-selTx.cy),cd=Math.hypot(cC.x-selTx.cx,cC.y-selTx.cy);if(pd>1){const sc=cd/pd;selTx.sx*=sc;selTx.sy*=sc;}}
   else if(h==='h:TC'||h==='h:BC'){const cos=Math.cos(selTx.rot),sin=Math.sin(selTx.rot),dot=dx*(-sin)+dy*cos;selTx.sy=Math.max(.05,(selBBox.h*selTx.sy/2+dot*(h==='h:TC'?-1:1))*2/selBBox.h);}
   else if(h==='h:ML'||h==='h:MR'){const cos=Math.cos(selTx.rot),sin=Math.sin(selTx.rot),dot=dx*cos+dy*sin;selTx.sx=Math.max(.05,(selBBox.w*selTx.sx/2+dot*(h==='h:ML'?-1:1))*2/selBBox.w);}
-  else if(h.startsWith('m:')){const[,r,c]=h.split(':');meshPts[+r][+c].dx+=dx;meshPts[+r][+c].dy+=dy;}
+  // mesh warp ('m:r:c') removed
   drawSelOv();
 }
 // R8 ↔ RGBA conversion helpers for 2D canvas operations
@@ -1220,122 +1215,86 @@ function execLasso(){
   // visually hiding the original ink. commitTransform does the atomic erase+write.
 
   selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};
-  lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
+  lassoPath=[];setSelState('transform');scheduleDraw();
 }
 
 function commitTransform(){
   if(!selImg||!selBBox||!selTx||!selOrig)return;
   const l=gLayers[gActiveIdx];if(!l||l.id!==selOrig.layerId)return;
 
-  // IMPORTANT: writeR8Bbox writes to TEXTURE only, not FBO.
-  // readR8Bbox reads from FBO. So FBO still has ORIGINAL data (pre-execLasso).
-  // Correct flow:
-  //   1. Read FBO = original (selection ink still present)
-  //   2. Erase selection ink at original position (using selImg alpha as mask)
-  //   3. Add warped selection ink at new position
-  //   4. Write result to texture
+  // Destination bbox: where selTx places the transformed selection
+  const{cx,cy,rot,sx,sy}=selTx;
+  const hw=selBBox.w*sx/2,hh=selBBox.h*sy/2;
+  // Four corners of transformed rect in canvas space
+  const cos=Math.cos(rot),sin=Math.sin(rot);
+  const corners=[[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([lx,ly])=>({
+    x:cos*lx-sin*ly+cx, y:sin*lx+cos*ly+cy
+  }));
+  const wbx=Math.max(0,Math.floor(Math.min(...corners.map(p=>p.x))));
+  const wby=Math.max(0,Math.floor(Math.min(...corners.map(p=>p.y))));
+  const wbxE=Math.min(CW,Math.ceil(Math.max(...corners.map(p=>p.x)))+2);
+  const wbyE=Math.min(CH,Math.ceil(Math.max(...corners.map(p=>p.y)))+2);
+  const wbw=Math.max(1,wbxE-wbx),wbh=Math.max(1,wbyE-wby);
 
-  // Warp output bbox
-  let wxMin=Infinity,wxMax=-Infinity,wyMin=Infinity,wyMax=-Infinity;
-  for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
-    const p=meshPtW(r,c);
-    wxMin=Math.min(wxMin,p.x);wxMax=Math.max(wxMax,p.x);
-    wyMin=Math.min(wyMin,p.y);wyMax=Math.max(wyMax,p.y);
-  }
-  const wbx=Math.max(0,Math.floor(wxMin));
-  const wby=Math.max(0,Math.floor(wyMin));
-  const wbxE=Math.min(CW,Math.ceil(wxMax)+2);
-  const wbyE=Math.min(CH,Math.ceil(wyMax)+2);
-  const wbw=Math.max(1,wbxE-wbx);
-  const wbh=Math.max(1,wbyE-wby);
-
-  // Union bbox covering original position + warp destination
-  const ux=Math.min(selOrig.bx,wbx);
-  const uy=Math.min(selOrig.by,wby);
+  // Union bbox: original + destination
+  const ux=Math.min(selOrig.bx,wbx),uy=Math.min(selOrig.by,wby);
   const uxE=Math.max(selOrig.bx+selOrig.bw,wbxE);
   const uyE=Math.max(selOrig.by+selOrig.bh,wbyE);
-  const uw=Math.min(CW-ux,uxE-ux);
-  const uh=Math.min(CH-uy,uyE-uy);
+  const uw=Math.min(CW-ux,uxE-ux),uh=Math.min(CH-uy,uyE-uy);
   if(uw<1||uh<1){commitCleanup();scheduleDraw();return;}
 
-  // Step 1: read FBO (original state — selection ink still present)
+  // Read union region from FBO (original state, selection ink still present)
   const r8=readR8Bbox(l.fbo,ux,uy,uw,uh);
 
-  // Step 2: erase selection ink at original position
-  // selImg is canvas-order RGBA; alpha>127 = was selected ink
+  // Erase original selection from r8
   const selCtx=selImg.getContext('2d');
   const selId=selCtx.getImageData(0,0,selBBox.w,selBBox.h);
   for(let row=0;row<selBBox.h;row++){
-    const yr=selBBox.y-uy+row; // canvas row in union
+    const yr=selBBox.y-uy+row;
     const fboRowU=uh-1-yr;
     if(fboRowU<0||fboRowU>=uh)continue;
     for(let col=0;col<selBBox.w;col++){
       const xc=selBBox.x-ux+col;
       if(xc<0||xc>=uw)continue;
-      if(selId.data[(row*selBBox.w+col)*4+3]>127)
-        r8[fboRowU*uw+xc]=0;
+      if(selId.data[(row*selBBox.w+col)*4+3]>127)r8[fboRowU*uw+xc]=0;
     }
   }
 
-  // Step 3: render warp and add to buffer
-  if(wbw<=CW&&wbh<=CH){
-    try{
-      const warpC=document.createElement('canvas');
-      warpC.width=wbw;warpC.height=wbh;
-      const wctx=warpC.getContext('2d',{willReadFrequently:true});
-      drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,
-        (r,c)=>{const p=meshPtW(r,c);return{x:p.x-wbx,y:p.y-wby};});
-      const warpId=wctx.getImageData(0,0,wbw,wbh);
-      for(let row=0;row<wbh;row++){
-        const yr=wby-uy+row;
-        const fboRowU=uh-1-yr;
-        if(fboRowU<0||fboRowU>=uh)continue;
-        for(let col=0;col<wbw;col++){
-          const xc=wbx-ux+col;
-          if(xc<0||xc>=uw)continue;
-          if(warpId.data[(row*wbw+col)*4+3]>127)
-            r8[fboRowU*uw+xc]=255;
-        }
+  // Render transformed selection using 2D canvas affine transform
+  try{
+    const warpC=document.createElement('canvas');warpC.width=wbw;warpC.height=wbh;
+    const wctx=warpC.getContext('2d',{willReadFrequently:true});
+    // Transform: origin at (cx-wbx, cy-wby), rotate, scale, draw selImg centered
+    wctx.save();
+    wctx.translate(cx-wbx,cy-wby);
+    wctx.rotate(rot);
+    wctx.scale(sx,sy);
+    wctx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);
+    wctx.restore();
+    const warpId=wctx.getImageData(0,0,wbw,wbh);
+    for(let row=0;row<wbh;row++){
+      const yr=wby-uy+row;
+      const fboRowU=uh-1-yr;
+      if(fboRowU<0||fboRowU>=uh)continue;
+      for(let col=0;col<wbw;col++){
+        const xc=wbx-ux+col;
+        if(xc<0||xc>=uw)continue;
+        if(warpId.data[(row*wbw+col)*4+3]>127)r8[fboRowU*uw+xc]=255;
       }
-    }catch(e){}
-  }
+    }
+  }catch(e){console.warn('commitTransform warp failed:',e);}
 
-  // Step 4: single write
   writeR8Bbox(l.tex,ux,uy,uw,uh,r8);
   commitCleanup();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
 }
 function commitCleanup(){
-  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
+  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;selHandle=null;selPrevPt=null;origLassoPath=[];
   document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
-}
-const SEAM=0.8;
-function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
-  const gcx=(x0+x1+x2)/3,gcy=(y0+y1+y2)/3;
-  function exp(x,y){const dx=x-gcx,dy=y-gcy,d=Math.hypot(dx,dy)||1;return[x+dx/d*SEAM,y+dy/d*SEAM];}
-  const[ex0,ey0]=exp(x0,y0),[ex1,ey1]=exp(x1,y1),[ex2,ey2]=exp(x2,y2);
-  const du1=u1-u0,du2=u2-u0,dv1=v1-v0,dv2=v2-v0,det=du1*dv2-du2*dv1;
-  if(Math.abs(det)<.0001)return;
-  const dx1=ex1-ex0,dx2=ex2-ex0,dy1=ey1-ey0,dy2=ey2-ey0;
-  const a=(dx1*dv2-dx2*dv1)/det,b=(dy1*dv2-dy2*dv1)/det,cc=(du1*dx2-du2*dx1)/det,d=(du1*dy2-du2*dy1)/det;
-  const e=ex0-a*u0-cc*v0,ff=ey0-b*u0-d*v0;
-  ctx.save();ctx.beginPath();ctx.moveTo(ex0,ey0);ctx.lineTo(ex1,ey1);ctx.lineTo(ex2,ey2);ctx.closePath();ctx.clip();
-  ctx.transform(a,b,cc,d,e,ff);ctx.drawImage(src,0,0,srcW,srcH);ctx.restore();
-}
-// Catmull-Rom spline interpolation: t in [0,1], p0..p3 are 4 control points
-// Returns the interpolated point between p1 and p2.
-function drawMeshWarp(ctx,src,srcW,srcH,coordFn){
-  const cw=srcW/4,ch=srcH/4;
-  for(let row=0;row<4;row++)for(let col=0;col<4;col++){
-    const p00=coordFn(row,col),p10=coordFn(row,col+1),p01=coordFn(row+1,col),p11=coordFn(row+1,col+1);
-    const u0=col*cw,u1=(col+1)*cw,v0=row*ch,v1=(row+1)*ch;
-    drawTriTex(ctx,src,srcW,srcH,p00.x,p00.y,p10.x,p10.y,p01.x,p01.y,u0,v0,u1,v0,u0,v1);
-    drawTriTex(ctx,src,srcW,srcH,p10.x,p10.y,p11.x,p11.y,p01.x,p01.y,u1,v0,u1,v1,u0,v1);
-  }
 }
 function setSelState(s){
   selState=s;const btn=document.getElementById('sel-btn');btn.className='leftbtn';
   if(s==='lasso'){btn.classList.add('lasso');setSelHint('なげなわで範囲を描いてください');}
-  else if(s==='transform'){btn.classList.add('transform');setSelHint('ハンドル/メッシュ点で変形 → 再タップで確定');}
+  else if(s==='transform'){btn.classList.add('transform');setSelHint('ハンドルで移動/拡縮/回転 → 再タップで確定');}
   else setSelHint(null);drawSelOv();
 }
 function cancelSel(){
@@ -1347,7 +1306,7 @@ function cancelSel(){
       scheduleDraw();
     }
   }
-  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
+  selState=null;selBBox=null;selImg=null;selOrig=null;selTx=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
   document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
 }
 function drawSelOv(){
@@ -1357,19 +1316,24 @@ function drawSelOv(){
     sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();
   }
   if(selState==='transform'&&selImg&&selBBox&&selTx){
+    // Fill original position with bg color
     if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
-    drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
+    // Draw selection image with affine transform (translate+rotate+scale) — no mesh warp
+    const{cx,cy,rot,sx,sy}=selTx;
+    const ctr=canvasToScreen(cx,cy);
+    sovCtx.save();
+    sovCtx.translate(ctr.x,ctr.y);
+    sovCtx.rotate(rot+view.rot);
+    sovCtx.scale(sx*view.scale,sy*view.scale);
+    sovCtx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);
+    sovCtx.restore();
+    // Draw handles
     const H=getHandles(),corners=[H.TL,H.TR,H.BR,H.BL];
     sovCtx.save();sovCtx.strokeStyle='rgba(249,115,22,.8)';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);
     sovCtx.beginPath();corners.forEach((p,i)=>i?sovCtx.lineTo(p.x,p.y):sovCtx.moveTo(p.x,p.y));sovCtx.closePath();sovCtx.stroke();
     sovCtx.setLineDash([2,3]);sovCtx.strokeStyle='rgba(249,115,22,.5)';sovCtx.beginPath();sovCtx.moveTo(H.TC.x,H.TC.y);sovCtx.lineTo(H.ROT.x,H.ROT.y);sovCtx.stroke();sovCtx.restore();
     ['TL','TC','TR','ML','MR','BL','BC','BR'].forEach(n=>{const p=H[n];if(!p)return;sovCtx.save();sovCtx.fillStyle='#fff';sovCtx.strokeStyle='#f97316';sovCtx.lineWidth=1.5;sovCtx.beginPath();sovCtx.rect(p.x-7,p.y-7,14,14);sovCtx.fill();sovCtx.stroke();sovCtx.restore();});
     const rp=H.ROT;sovCtx.save();sovCtx.fillStyle='#fff';sovCtx.strokeStyle='#f97316';sovCtx.lineWidth=2;sovCtx.beginPath();sovCtx.arc(rp.x,rp.y,9,0,Math.PI*2);sovCtx.fill();sovCtx.stroke();sovCtx.restore();
-    if(meshPts){sovCtx.save();sovCtx.strokeStyle='rgba(249,115,22,.22)';sovCtx.lineWidth=1;sovCtx.setLineDash([]);
-      for(let r=0;r<=4;r++){sovCtx.beginPath();for(let c=0;c<=4;c++){const sp=meshPtS(r,c);c?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);}sovCtx.stroke();}
-      for(let c=0;c<=4;c++){sovCtx.beginPath();for(let r=0;r<=4;r++){const sp=meshPtS(r,c);r?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);}sovCtx.stroke();}
-      for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){const sp=meshPtS(r,c);sovCtx.beginPath();sovCtx.arc(sp.x,sp.y,5,0,Math.PI*2);sovCtx.fillStyle='rgba(249,115,22,.65)';sovCtx.fill();}
-      sovCtx.restore();}
   }
 }
 
@@ -1799,8 +1763,8 @@ function renderLayers(){
 renderLayers._thumbT=null;
 document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
   e.preventDefault();e.stopPropagation();
+  if(gLayers.length>=3){showToast('レイヤーは最大3枚まで（メモリ保護）');return;}
   addGLLayer('レイヤー '+(gLayers.length+1),'#000000');
-  // New layer: capture initial empty state
   hist=[];histIdx=-1;
   scheduleDraw();setTimeout(captureNow,0);renderLayers();
 });
@@ -2455,7 +2419,14 @@ spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true
     gl.deleteTexture(compB_tex);gl.deleteFramebuffer(compB_fbo);
     compA_tex=makeRGBATexture(screenW,screenH);compA_fbo=makeRGBAFBO(compA_tex);
     compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeRGBAFBO(compB_tex);
-    fitView();resizeSelOv();
+    // Clamp sub-palette to new screen bounds (right-edge priority on rotation)
+    spPos.x=Math.min(spPos.x,screenW-170);
+    spPos.y=Math.max(60,Math.min(spPos.y,screenH-200));
+    spRender();
+    // Reset view to full-width — canvas coord system is device-rotation-independent
+    // (WebGL canvas is fixed fullscreen; view.x/y/scale map canvas→screen in JS)
+    resetView();
+    resizeSelOv();
   });
 })();
 </script>
