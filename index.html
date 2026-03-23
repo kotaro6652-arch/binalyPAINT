@@ -35,6 +35,16 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 #bg-input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;touch-action:manipulation;-webkit-appearance:none}
 #sv-btn{right:10px}
 #open-btn{right:calc(10px + 84px + 8px)}
+#new-btn{right:calc(10px + 84px + 8px + 72px + 8px)}
+/* 新規確認ダイアログ */
+#new-dialog{position:fixed;inset:0;z-index:500;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center}
+#new-dialog.show{display:flex}
+#new-dialog-box{background:var(--sf);border:1px solid var(--bd2);border-radius:16px;padding:20px 24px;max-width:320px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+#new-dialog-box h3{font-size:15px;color:var(--tx);margin-bottom:8px;font-weight:500}
+#new-dialog-box p{font-size:12px;color:var(--tx2);margin-bottom:18px;line-height:1.6}
+.nd-btn{width:100%;padding:11px;border-radius:10px;font-size:13px;cursor:pointer;touch-action:manipulation;margin-bottom:8px;border:1px solid}
+#nd-discard{background:rgba(248,113,113,.18);border-color:rgba(248,113,113,.5);color:var(--red)}
+#nd-cancel{background:var(--sf2);border-color:var(--bd2);color:var(--tx2)}
 #reset-view-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px);z-index:220;background:var(--sf);border:1px solid var(--bd2);border-radius:20px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
 #reset-view-btn:active{background:rgba(91,156,246,.18);color:var(--acc)}
 .toppanel{position:fixed;top:44px;z-index:219;background:var(--sf);border:1px solid var(--bd2);border-radius:12px;padding:10px;display:none;box-shadow:0 8px 32px rgba(0,0,0,.5);touch-action:manipulation}
@@ -174,7 +184,19 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div id="reset-view-btn">⊙ 実寸</div>
   <div class="topbtn" id="sv-btn">💾 保存</div>
   <label class="topbtn" id="open-btn" for="file-input">📂 開く</label>
+  <div class="topbtn" id="new-btn">🆕 新規</div>
   <input type="file" id="file-input" accept="image/*" style="display:none">
+
+  <!-- 新規作成確認ダイアログ -->
+  <div id="new-dialog">
+    <div id="new-dialog-box">
+      <h3>新規キャンバスを作成</h3>
+      <p>現在の描画は保存されません。<br>続行しますか？</p>
+      <button class="nd-btn" id="nd-save-first">💾 先に保存してから新規作成</button>
+      <button class="nd-btn" id="nd-discard">🗑 保存せず新規作成</button>
+      <button class="nd-btn" id="nd-cancel">キャンセル</button>
+    </div>
+  </div>
 
   <div class="toppanel" id="sz-panel">
     <div class="sz-opt" data-w="1180" data-h="820"><div class="sz-opt-row">½x ハーフ <small>1180×820</small></div></div>
@@ -506,13 +528,15 @@ uniform bool u_flip;
 uniform float u_vrot;
 out vec4 o;
 void main(){
-  float su = u_flip ? 1.0-v_uv.x : v_uv.x;
-  float sv = v_uv.y;
-  float css_x = su * u_screen.x;
-  float css_y = (1.0-sv) * u_screen.y;
-  // Rotate around canvas center in screen space
+  // Screen UV → CSS pixel
+  float css_x = v_uv.x * u_screen.x;
+  float css_y = (1.0-v_uv.y) * u_screen.y;
+  // Canvas center in screen space
   float ccx = u_vxy.x + u_canvas.x * 0.5 * u_vscale;
   float ccy = u_vxy.y + u_canvas.y * 0.5 * u_vscale;
+  // Flip: mirror around canvas center (consistent with JS screenToCanvas)
+  if(u_flip) css_x = 2.0 * ccx - css_x;
+  // Rotate around canvas center
   float dx = css_x - ccx, dy = css_y - ccy;
   float cosR = cos(-u_vrot), sinR = sin(-u_vrot);
   css_x = dx*cosR - dy*sinR + ccx;
@@ -533,6 +557,9 @@ void main(){
     return;
   }
   vec3 base = u_first ? u_bg : texture(u_base, v_uv).rgb;
+  // texture() with LINEAR_MIPMAP_LINEAR: GPU auto-selects correct mip level.
+  // Mipmaps updated every ~16ms during stroke (flushBrush time-gate),
+  // so mid-stroke and idle display are always consistent.
   float ink_r = texture(u_layer, vec2(tu, tv)).r;
   float ink = ink_r * u_opacity;
   vec3 rgb;
@@ -580,10 +607,10 @@ let gLayers=[],gActiveIdx=0;
 function makeR8Texture(w,h){
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,w,h,0,gl.RED,gl.UNSIGNED_BYTE,null);
-  // MAG=NEAREST: zoom-in shows crisp binary pixels, ZERO bleed between 0 and 255 neighbors.
-  //   LINEAR MAG was blending 255/0 border pixels → gray semi-transparent stroke edges.
-  // MIN=LINEAR: zoom-out averages binary texels → correct ink density, no mipmaps needed.
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  // LINEAR_MIPMAP_LINEAR: correct density averaging at zoom-out (no moiré).
+  // NEAREST: crisp binary pixels at zoom-in (no blur).
+  // Mipmaps generated once per stroke in finishStroke() — safe, not per-touchmove.
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
@@ -655,16 +682,33 @@ function flushBrush(){
   gl.uniform1f(ul(PROG.brush,'u_val'),eraserOn?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
+  // Generate mipmaps with time-gate (max 60fps = 16ms interval).
+  // This keeps mid-stroke display identical to idle — both use texture() with correct mip.
+  // At 4x canvas, generateMipmap is ~2ms on iPad GPU when idle between touchmove events.
+  const now=performance.now();
+  if(now-flushBrush._lastMip>16){
+    flushBrush._lastMip=now;
+    gl.bindTexture(gl.TEXTURE_2D,layer.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D,null);
+  }
   scheduleDraw();
-  // NOTE: mipmap regen moved to finishStroke() — NOT here.
-  // Calling generateMipmap every touchmove (12 mip levels × 4x canvas) caused 3-10s freezes.
 }
+flushBrush._lastMip=0;
 
 // ── Mipmap dirty set: batch regen once after stroke ends ───────
 // NEVER called during active stroke (touchmove). Only called from:
 //   finishStroke(), restoreSnap(), writeR8Bbox(), file open
-// scheduleMipmap: no-op — texture uses LINEAR (not LINEAR_MIPMAP_LINEAR), no mipmaps needed.
-function scheduleMipmap(layer){} // intentionally empty
+// generateMipmapNow: synchronous mipmap generation.
+// Called AFTER flushBrush() in finishStroke, and after any texSubImage2D write.
+// Runs before the next scheduleDraw() rAF, so composite always sees fresh mipmaps.
+// Safe to call at stroke-end (not mid-stroke) — 12 mip levels is fast on GPU when idle.
+function scheduleMipmap(layer){
+  if(!layer||!layer.tex)return;
+  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+}
 function queueDot(x,y,d){
   if(instCount>=MAX_INST)flushBrush();
   instArr[instCount*3]=x;instArr[instCount*3+1]=y;instArr[instCount*3+2]=d/2;instCount++;
@@ -780,6 +824,10 @@ function finishStroke(){
     }
   }
   if(instCount>0)flushBrush();
+  // Generate mipmaps synchronously NOW — before scheduleDraw()'s rAF fires.
+  // This ensures composite always uses fresh, complete mip chain (no stale mip1+).
+  const layer=gLayers[gActiveIdx];
+  if(layer)scheduleMipmap(layer);
   lastDrawPt=null;stabClear();_crBuf=[];
 }
 
@@ -870,6 +918,10 @@ function rgb01ToHex(c){return'#'+c.map(v=>Math.round(v*255).toString(16).padStar
 function addGLLayer(name,hexColor){
   const tex=makeR8Texture(CW,CH),fbo=makeR8FBO(tex);
   gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  // LINEAR_MIPMAP_LINEAR requires a complete mipmap chain — generate now on the cleared texture.
+  // Without this, the texture is "incomplete" and WebGL samples it as black/transparent
+  // until the first finishStroke() calls scheduleMipmap().
+  gl.bindTexture(gl.TEXTURE_2D,tex);gl.generateMipmap(gl.TEXTURE_2D);gl.bindTexture(gl.TEXTURE_2D,null);
   const l={id:(Date.now()*1000+Math.random()*999)|0,name,color:hexToRGB01(hexColor||'#000000'),opacity:1,visible:true,blend:'normal',tex,fbo};
   gLayers.push(l);gActiveIdx=gLayers.length-1;return l;
 }
@@ -936,23 +988,18 @@ function updateThumbs(){
 
 // ── View ────────────────────────────────────────────────────
 function fitView(){
-  // 実寸: 1キャンバスpx = 1物理px → scale = 1/devicePixelRatio
-  // キャンバスが画面より大きければ収まる最大倍率まで縮小
   const sw=window.innerWidth,sh=window.innerHeight;
-  const dpr=window.devicePixelRatio||1;
-  const realScale=1/dpr; // 物理ピクセル等倍
-  const maxFit=Math.min(sw/CW,sh/CH);
-  view.scale=Math.min(realScale,maxFit);
+  // 起動時: キャンバスが画面に収まる最大倍率、中央表示
+  view.scale=Math.min(sw/CW,sh/CH)*0.96;
   view.x=(sw-CW*view.scale)/2;
   view.y=(sh-CH*view.scale)/2;
   view.rot=0;
   applyView();
 }
 function resetView(){
-  // 実寸: キャンバス左右がモニタ左右と一致、物理ピクセル等倍
-  // scale = screenW / CW → キャンバス左=0, キャンバス右=screenW
+  // 実寸ボタン: キャンバス幅=画面幅、上下中央
   const sw=window.innerWidth,sh=window.innerHeight;
-  view.scale=sw/CW; // キャンバス幅 = 画面幅 ピッタリ
+  view.scale=sw/CW;
   view.x=0;
   view.y=(sh-CH*view.scale)/2;
   view.rot=0;
@@ -990,9 +1037,10 @@ function saveState(){
           erb:document.getElementById('erb').style.top,
           sel:document.getElementById('sel-btn').style.top,
         },
-        tabDotY:document.getElementById('rpanel-group').style.top,
+
         subPalettePos:spPos,subPaletteMin:spMinimized,
         subSlots:spSlots,subActiveSlot:spActiveSlot,
+        // tabDotY intentionally NOT saved — restoring old position causes layout bugs
       };
       localStorage.setItem(LS_KEY,JSON.stringify(state));
     }catch(e){}
@@ -1016,7 +1064,7 @@ function loadState(){
       if(s.leftBtns.erb)document.getElementById('erb').style.top=s.leftBtns.erb;
       if(s.leftBtns.sel)document.getElementById('sel-btn').style.top=s.leftBtns.sel;
     }
-    if(s.tabDotY)document.getElementById('rpanel-group').style.top=s.tabDotY;
+
     if(s.subPalettePos)spPos={...spPos,...s.subPalettePos};
     if(s.subPaletteMin!==undefined)spMinimized=s.subPaletteMin;
     if(s.subSlots)spSlots=s.subSlots;
@@ -1137,87 +1185,123 @@ function execLasso(){
   if(bw<4||bh<4){lassoPath=[];setSelState(null);showToast('選択範囲が小さすぎます');return;}
   selBBox={x:bx,y:by,w:bw,h:bh};origLassoPath=[...lassoPath];
 
-  // Read ONLY the bounding box (bw*bh bytes, not CW*CH bytes)
+  // Read FBO (original data, never modified by writeR8Bbox)
   const r8box=readR8Bbox(l.fbo,bx,by,bw,bh);
-  // Store a copy for undo — selOrig lets us cancel without corruption
-  const r8boxCopy=new Uint8Array(r8box);
-  selOrig={r8:r8boxCopy,bx,by,bw,bh,layerId:l.id};
 
-  // Convert bbox to small RGBA canvas
-  const bboxCanvas=r8BboxToCanvas(r8box,bw,bh,l.color);
+  // Store original for cancel/undo
+  selOrig={r8:new Uint8Array(r8box),bx,by,bw,bh,layerId:l.id};
 
-  // Lasso mask (canvas order, bw*bh)
+  // Build selImg: RGBA canvas with only the selected ink (canvas order, y=0=top)
+  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;
+  const ectx=ec.getContext('2d');
+  const rgba=new Uint8ClampedArray(bw*bh*4);
+  const[ir,ig,ib]=l.color.map(v=>Math.round(v*255));
+  // Lasso mask: fill lasso path into a temp canvas
   const mc=document.createElement('canvas');mc.width=bw;mc.height=bh;const mctx=mc.getContext('2d');
   mctx.fillStyle='#fff';mctx.beginPath();
   lassoPath.forEach((p,i)=>{i?mctx.lineTo(p.x-bx,p.y-by):mctx.moveTo(p.x-bx,p.y-by);});
   mctx.closePath();mctx.fill();
-
-  // Extract selection: keep only inside lasso
-  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;const ectx=ec.getContext('2d');
-  ectx.drawImage(bboxCanvas,0,0);ectx.globalCompositeOperation='destination-in';ectx.drawImage(mc,0,0);selImg=ec;
-
-  // Erase inside lasso from r8box (FBO order)
-  const maskId=mc.getContext('2d').getImageData(0,0,bw,bh);
-  const r8erased=new Uint8Array(bw*bh);
+  const maskId=mctx.getImageData(0,0,bw,bh);
   for(let row=0;row<bh;row++){
-    const fboRow=bh-1-row;
+    const fboRow=bh-1-row; // FBO y-flip
     for(let col=0;col<bw;col++){
       const insideLasso=maskId.data[(row*bw+col)*4+3]>127;
-      r8erased[fboRow*bw+col]=insideLasso?0:r8box[fboRow*bw+col];
+      const hasInk=r8box[fboRow*bw+col]>127;
+      const oi=(row*bw+col)*4;
+      rgba[oi]=ir;rgba[oi+1]=ig;rgba[oi+2]=ib;
+      rgba[oi+3]=(insideLasso&&hasInk)?255:0;
     }
   }
-  writeR8Bbox(l.tex,bx,by,bw,bh,r8erased);
+  ectx.putImageData(new ImageData(rgba,bw,bh),0,0);
+  selImg=ec;
 
-  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');
-  // Capture undo AFTER erasing (so undo restores erased state, not original)
-  setTimeout(captureNow,0);
-  scheduleDraw();
+  // NOTE: do NOT call writeR8Bbox here.
+  // drawSelOv fills the lasso area with bgColor and draws selImg on top,
+  // visually hiding the original ink. commitTransform does the atomic erase+write.
+
+  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};
+  lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
 }
 
 function commitTransform(){
-  if(!selImg||!selBBox||!selTx)return;
-  const l=gLayers[gActiveIdx];if(!l)return;
+  if(!selImg||!selBBox||!selTx||!selOrig)return;
+  const l=gLayers[gActiveIdx];if(!l||l.id!==selOrig.layerId)return;
 
-  // Compute warped output bounding box
+  // IMPORTANT: writeR8Bbox writes to TEXTURE only, not FBO.
+  // readR8Bbox reads from FBO. So FBO still has ORIGINAL data (pre-execLasso).
+  // Correct flow:
+  //   1. Read FBO = original (selection ink still present)
+  //   2. Erase selection ink at original position (using selImg alpha as mask)
+  //   3. Add warped selection ink at new position
+  //   4. Write result to texture
+
+  // Warp output bbox
   let wxMin=Infinity,wxMax=-Infinity,wyMin=Infinity,wyMax=-Infinity;
   for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
     const p=meshPtW(r,c);
     wxMin=Math.min(wxMin,p.x);wxMax=Math.max(wxMax,p.x);
     wyMin=Math.min(wyMin,p.y);wyMax=Math.max(wyMax,p.y);
   }
-  const obx=Math.max(0,Math.floor(wxMin)),oby=Math.max(0,Math.floor(wyMin));
-  const obw=Math.min(CW-obx,Math.ceil(wxMax)-obx+2),obh=Math.min(CH-oby,Math.ceil(wyMax)-oby+2);
-  if(obw<1||obh<1){commitCleanup();return;}
+  const wbx=Math.max(0,Math.floor(wxMin));
+  const wby=Math.max(0,Math.floor(wyMin));
+  const wbxE=Math.min(CW,Math.ceil(wxMax)+2);
+  const wbyE=Math.min(CH,Math.ceil(wyMax)+2);
+  const wbw=Math.max(1,wbxE-wbx);
+  const wbh=Math.max(1,wbyE-wby);
 
-  try{
-    // Render warp into a small canvas (only bbox size — not full canvas)
-    const warpC=document.createElement('canvas');
-    warpC.width=obw;warpC.height=obh;
-    const wctx=warpC.getContext('2d',{willReadFrequently:true});
-    if(!wctx)throw new Error('canvas context unavailable');
-    drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,
-      (r,c)=>{const p=meshPtW(r,c);return{x:p.x-obx,y:p.y-oby};});
-    const warpId=wctx.getImageData(0,0,obw,obh);
+  // Union bbox covering original position + warp destination
+  const ux=Math.min(selOrig.bx,wbx);
+  const uy=Math.min(selOrig.by,wby);
+  const uxE=Math.max(selOrig.bx+selOrig.bw,wbxE);
+  const uyE=Math.max(selOrig.by+selOrig.bh,wbyE);
+  const uw=Math.min(CW-ux,uxE-ux);
+  const uh=Math.min(CH-uy,uyE-uy);
+  if(uw<1||uh<1){commitCleanup();scheduleDraw();return;}
 
-    // Read current layer at output bbox (small GPU read, not full canvas)
-    const r8cur=readR8Bbox(l.fbo,obx,oby,obw,obh);
+  // Step 1: read FBO (original state — selection ink still present)
+  const r8=readR8Bbox(l.fbo,ux,uy,uw,uh);
 
-    // Merge directly in R8 arrays — avoids large RGBA canvas allocations
-    // that fail under memory pressure and produce white-out
-    const r8new=new Uint8Array(obw*obh);
-    for(let row=0;row<obh;row++){
-      const fboRow=obh-1-row; // canvas→FBO y-flip
-      for(let col=0;col<obw;col++){
-        const wink=warpId.data[(row*obw+col)*4+3]>127?255:0;
-        r8new[fboRow*obw+col]=wink||r8cur[fboRow*obw+col];
-      }
+  // Step 2: erase selection ink at original position
+  // selImg is canvas-order RGBA; alpha>127 = was selected ink
+  const selCtx=selImg.getContext('2d');
+  const selId=selCtx.getImageData(0,0,selBBox.w,selBBox.h);
+  for(let row=0;row<selBBox.h;row++){
+    const yr=selBBox.y-uy+row; // canvas row in union
+    const fboRowU=uh-1-yr;
+    if(fboRowU<0||fboRowU>=uh)continue;
+    for(let col=0;col<selBBox.w;col++){
+      const xc=selBBox.x-ux+col;
+      if(xc<0||xc>=uw)continue;
+      if(selId.data[(row*selBBox.w+col)*4+3]>127)
+        r8[fboRowU*uw+xc]=0;
     }
-    writeR8Bbox(l.tex,obx,oby,obw,obh,r8new);
-  }catch(e){
-    showToast('変形失敗（メモリ不足）');
-    commitCleanup();scheduleDraw();return;
   }
 
+  // Step 3: render warp and add to buffer
+  if(wbw<=CW&&wbh<=CH){
+    try{
+      const warpC=document.createElement('canvas');
+      warpC.width=wbw;warpC.height=wbh;
+      const wctx=warpC.getContext('2d',{willReadFrequently:true});
+      drawMeshWarp(wctx,selImg,selBBox.w,selBBox.h,
+        (r,c)=>{const p=meshPtW(r,c);return{x:p.x-wbx,y:p.y-wby};});
+      const warpId=wctx.getImageData(0,0,wbw,wbh);
+      for(let row=0;row<wbh;row++){
+        const yr=wby-uy+row;
+        const fboRowU=uh-1-yr;
+        if(fboRowU<0||fboRowU>=uh)continue;
+        for(let col=0;col<wbw;col++){
+          const xc=wbx-ux+col;
+          if(xc<0||xc>=uw)continue;
+          if(warpId.data[(row*wbw+col)*4+3]>127)
+            r8[fboRowU*uw+xc]=255;
+        }
+      }
+    }catch(e){}
+  }
+
+  // Step 4: single write
+  writeR8Bbox(l.tex,ux,uy,uw,uh,r8);
   commitCleanup();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
 }
 function commitCleanup(){
@@ -1237,6 +1321,8 @@ function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
   ctx.save();ctx.beginPath();ctx.moveTo(ex0,ey0);ctx.lineTo(ex1,ey1);ctx.lineTo(ex2,ey2);ctx.closePath();ctx.clip();
   ctx.transform(a,b,cc,d,e,ff);ctx.drawImage(src,0,0,srcW,srcH);ctx.restore();
 }
+// Catmull-Rom spline interpolation: t in [0,1], p0..p3 are 4 control points
+// Returns the interpolated point between p1 and p2.
 function drawMeshWarp(ctx,src,srcW,srcH,coordFn){
   const cw=srcW/4,ch=srcH/4;
   for(let row=0;row<4;row++)for(let col=0;col<4;col++){
@@ -1298,13 +1384,15 @@ function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)r
 
 document.addEventListener('touchstart',function(e){
   const st=getStylusT(e.changedTouches);if(!st)return;
-  const tabId=getTabAtPoint(st.clientX,st.clientY);
-  if(tabId!==null){
-    e.preventDefault();
-    const pn=TAB_MAP[tabId];if(!pn)return;
-    // 全タブ即時開閉（スタイラス）
-    openPanelFn(pn);
-    return;
+  // Stylus tab detection: check if touch target is inside #rtabs
+  const hitEl=document.elementFromPoint(st.clientX,st.clientY);
+  if(hitEl){
+    const tab=hitEl.closest('.rtab');
+    if(tab&&TAB_MAP[tab.id]){
+      e.preventDefault();
+      openPanelFn(TAB_MAP[tab.id]);
+      return;
+    }
   }
   const tgt=classifyPenTarget(st.clientX,st.clientY);
   if(tgt==='panel')return;
@@ -1317,7 +1405,6 @@ document.addEventListener('touchstart',function(e){
   if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
   if(selState==='transform'){const h=hitHandle(st.clientX,st.clientY);if(h){selHandle=h;selPrevPt={x:st.clientX,y:st.clientY};return;}}
   updPRC(st.clientX,st.clientY,st.force);
-  // Start timer to auto-close tool panel once pen is on canvas
   schedulePanelAutoClose();
   beginStroke(st.clientX,st.clientY,st.force);
 },{passive:false,capture:true});
@@ -1390,7 +1477,10 @@ document.addEventListener('touchmove',function(e){
     const dist=Math.hypot(b.x-a.x,b.y-a.y);
     const mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
     const angle=Math.atan2(b.y-a.y,b.x-a.x);
-    const dAngle=angle-pinchBase.angle;
+    // When flip is active, the canvas is mirrored → rotation direction appears reversed.
+    // Negate dAngle to compensate.
+    const rawDAngle=angle-pinchBase.angle;
+    const dAngle=flipState?-rawDAngle:rawDAngle;
     const minS=Math.min(screenW/CW,screenH/CH)*0.1;
     const ns=Math.max(minS,Math.min(14,pinchBase.scale*dist/pinchBase.dist));
     const f=ns/pinchBase.scale;
@@ -1466,6 +1556,38 @@ applyBg('#ffffff');
 bgInput.addEventListener('input',e=>applyBg(e.target.value));bgInput.addEventListener('change',e=>applyBg(e.target.value));
 document.getElementById('reset-view-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();resetView();});
 
+// ── 新規作成 ────────────────────────────────────────────────
+function doNewCanvas(){
+  gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
+  _r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
+  addGLLayer('レイヤー 1','#000000');
+  fitView();setTimeout(captureNow,0);renderLayers();
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;
+  showToast('新規キャンバス');
+}
+const newDialog=document.getElementById('new-dialog');
+document.getElementById('new-btn').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  newDialog.classList.add('show');
+});
+document.getElementById('nd-save-first').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  newDialog.classList.remove('show');
+  // 保存パネルを開いてから新規作成フラグをセット
+  svPanel.classList.add('open');
+  document.getElementById('sv-now').textContent='📄 '+reiwaFn()+'.png';
+  svPanel._afterSave=()=>doNewCanvas();
+});
+document.getElementById('nd-discard').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  newDialog.classList.remove('show');doNewCanvas();
+});
+document.getElementById('nd-cancel').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();newDialog.classList.remove('show');
+});
+// ダイアログ外タップでキャンセル
+newDialog.addEventListener('pointerdown',e=>{if(e.target===newDialog)newDialog.classList.remove('show');});
+
 const rpg=document.getElementById('rpanel-group'),tabDot=document.getElementById('tab-dot');
 let tdY=window.innerHeight*.35,tdPD=false,tdDSY=0,tdDBY=0;
 rpg.style.top=tdY+'px';rpg.style.transform='';
@@ -1505,41 +1627,25 @@ function schedulePanelAutoClose(){
   }
 }
 
-// ── Tab interaction ──────────────────────────────────────────
-// 全タブ共通: pointerdown で即時開閉。
-// 指がタブから6px以上動いたらパネルを閉じてドラッグモードへ移行。
-// TOOL_TABS の区別を廃止 — 複雑な hold/tap ロジックがフリーズの原因だった。
-const TOOL_TABS=new Set(['tab-br','tab-mk']); // サブパレットドラッグ用に残す
+// ── Tab touchstart ─────────────────────────────────────────
+// Document capture always fires before element capture in the DOM spec.
+// Only reliable approach: check target in document capture handler itself.
+// LAYER tab already works because it has no drag interference.
+const TOOL_TABS=new Set(['tab-br','tab-mk']);
 
+// Finger tab open via pointerdown (reliable for finger, document capture handles stylus)
 Object.entries(TAB_MAP).forEach(([tabId,panelName])=>{
   if(!panelName)return;
   const el=document.getElementById(tabId);if(!el)return;
-  let downX=0,downY=0,dragging=false;
-
   el.addEventListener('pointerdown',function(e){
-    if(e.pointerType==='pen')return;
+    if(e.pointerType==='pen')return; // stylus: handled in document touchstart capture
     e.preventDefault();e.stopPropagation();
-    downX=e.clientX;downY=e.clientY;dragging=false;
-    // 即時開閉（全タブ共通）
     openPanelFn(panelName);
   },{passive:false});
-
-  el.addEventListener('pointermove',function(e){
-    if(dragging)return;
-    if(Math.abs(e.clientX-downX)>6||Math.abs(e.clientY-downY)>6){
-      dragging=true;
-      // ドラッグ開始 → パネルを閉じてドラッグモードへ
-      if(openPanel===panelName)closePanel();
-    }
-  },{passive:true});
-
-  el.addEventListener('pointerup',()=>{dragging=false;},{passive:true});
-  el.addEventListener('pointercancel',()=>{dragging=false;},{passive:true});
 });
 document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;const szp=document.getElementById('sz-panel'),svp=document.getElementById('sv-panel');if(!szp.contains(e.target)&&e.target!==document.getElementById('sz-btn'))szp.classList.remove('open');if(!svp.contains(e.target)&&e.target!==document.getElementById('sv-btn'))svp.classList.remove('open');},{passive:true,capture:false});
 
-// ── Tab→Slot drag: drag tab icon onto sub-palette slot to save ──
-// Works for PEN, MARKER, ERASER tabs (finger touch drag)
+// ── Tab→Slot drag ────────────────────────────────────────────
 (function setupTabDrag(){
   const dragSources=[
     {tabId:'tab-br', getType:()=>'pen'},
@@ -1549,31 +1655,31 @@ document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;cons
   let _dragging=false,_dragType=null;
 
   function slotAtPoint(x,y){
-    const el=document.elementFromPoint(x,y);
-    if(!el)return null;
-    const slot=el.closest('.sp-slot');
-    return slot?+slot.dataset.slot:null;
+    const el=document.elementFromPoint(x,y);if(!el)return null;
+    const slot=el.closest('.sp-slot');return slot?+slot.dataset.slot:null;
   }
   function clearDragOver(){document.querySelectorAll('.sp-slot.drag-over').forEach(s=>s.classList.remove('drag-over'));}
 
   dragSources.forEach(({tabId,getType})=>{
     const tab=document.getElementById(tabId);if(!tab)return;
-    let _startX=0,_startY=0;
+    let _startX=0,_startY=0,_id=-1;
     tab.addEventListener('touchstart',e=>{
-      _dragging=false;_dragType=null;
-      _startX=e.touches[0].clientX;_startY=e.touches[0].clientY;
+      // passive:false so we can preventDefault once drag is confirmed
+      const t=e.changedTouches[0];
+      _dragging=false;_dragType=null;_startX=t.clientX;_startY=t.clientY;_id=t.identifier;
     },{passive:true});
     tab.addEventListener('touchmove',e=>{
-      const t=e.touches[0];
+      const t=[...e.changedTouches].find(c=>c.identifier===_id);if(!t)return;
       if(!_dragging){
-        const dx=Math.abs(t.clientX-_startX),dy=Math.abs(t.clientY-_startY);
-        if(dx>8||dy>8){
+        if(Math.abs(t.clientX-_startX)>8||Math.abs(t.clientY-_startY)>8){
           _dragging=true;_dragType=getType();
-          // Close any open panel immediately when drag begins
           if(openPanel)closePanel();
+          // Cancel any active pen stroke that may have started
+          if(penId!==null){finishStroke();penId=null;}
         }
       }
       if(_dragging){
+        e.stopPropagation(); // prevent document touchmove from continuing stroke
         clearDragOver();
         const idx=slotAtPoint(t.clientX,t.clientY);
         if(idx!==null){
@@ -1592,8 +1698,7 @@ document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;cons
           if(_dragType==='eraser'){eraserOn=true;}
           else{eraserOn=false;if(activeTool!==_dragType)switchTool(_dragType);}
           spSaveCurrentTool(idx);
-          eraserOn=prevEraser;
-          if(activeTool!==prevTool)switchTool(prevTool);
+          eraserOn=prevEraser;if(activeTool!==prevTool)switchTool(prevTool);
         }
         _dragging=false;_dragType=null;
       }
@@ -1789,8 +1894,8 @@ szConfirm.addEventListener('pointerdown',async e=>{
     gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.bindTexture(gl.TEXTURE_2D,tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,s.r8);
+    gl.generateMipmap(gl.TEXTURE_2D); // make texture complete before first draw
     gl.bindTexture(gl.TEXTURE_2D,null);
-    scheduleMipmap({tex});
     gLayers.push({id:s.id,name:s.name,color:s.color,opacity:s.opacity,visible:s.visible,blend:s.blend,tex,fbo});
   }
   gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
@@ -1834,6 +1939,8 @@ document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
     await new Promise(res=>{setTimeout(()=>{const a=document.createElement('a');a.href=tc.toDataURL('image/png');a.download=fn+'.png';document.body.appendChild(a);a.click();document.body.removeChild(a);res();},i*250);});
   }
   showToast('PNG ダウンロード完了');
+  // afterSave callback (e.g. 新規作成 after save)
+  if(svPanel._afterSave){const cb=svPanel._afterSave;svPanel._afterSave=null;setTimeout(cb,400);}
 });
 
 // ════════════════════════════════════════════════════════════
@@ -2312,9 +2419,9 @@ spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true
 (function init(){
   if(!initWebGL())return;
   addGLLayer('レイヤー 1','#000000');
-  // 設定は復元するがビュー位置は常に実寸センターに初期化
+  // 起動時: 画面に収まる倍率で中央表示（設定は復元するがビュー位置は常にリセット）
   const hadState=loadState();
-  resetView(); // 起動時は必ずリセット（4x編集後に画面外へ行くのを防ぐ）
+  fitView();
   scheduleDraw();setTimeout(captureNow,0);
   spRender();
 
