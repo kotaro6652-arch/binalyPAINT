@@ -1215,18 +1215,34 @@ function execLasso(){
   // visually hiding the original ink. commitTransform does the atomic erase+write.
 
   selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};
-  lassoPath=[];setSelState('transform');scheduleDraw();
+
+  // Immediately erase selection from R8 texture (not just visually via overlay).
+  // This is the correct approach:
+  //   - WebGL shows the erased layer immediately (no white-fill needed in drawSelOv)
+  //   - commitTransform reads FBO which now has the erased state (no FBO mismatch)
+  //   - No whitout: WebGL renders the correct state in the same frame
+  const r8erased=new Uint8Array(bw*bh);
+  for(let row=0;row<bh;row++){
+    const fboRow=bh-1-row;
+    for(let col=0;col<bw;col++){
+      const insideLasso=maskId.data[(row*bw+col)*4+3]>127;
+      r8erased[fboRow*bw+col]=insideLasso?0:r8box[fboRow*bw+col];
+    }
+  }
+  writeR8Bbox(l.tex,bx,by,bw,bh,r8erased);
+  scheduleDraw();
+
+  lassoPath=[];setSelState('transform');
 }
 
 function commitTransform(){
   if(!selImg||!selBBox||!selTx||!selOrig)return;
   const l=gLayers[gActiveIdx];if(!l||l.id!==selOrig.layerId)return;
 
-  // Destination bbox: where selTx places the transformed selection
   const{cx,cy,rot,sx,sy}=selTx;
   const hw=selBBox.w*sx/2,hh=selBBox.h*sy/2;
-  // Four corners of transformed rect in canvas space
   const cos=Math.cos(rot),sin=Math.sin(rot);
+  // Four corners of the transformed selection in canvas coords
   const corners=[[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([lx,ly])=>({
     x:cos*lx-sin*ly+cx, y:sin*lx+cos*ly+cy
   }));
@@ -1235,56 +1251,29 @@ function commitTransform(){
   const wbxE=Math.min(CW,Math.ceil(Math.max(...corners.map(p=>p.x)))+2);
   const wbyE=Math.min(CH,Math.ceil(Math.max(...corners.map(p=>p.y)))+2);
   const wbw=Math.max(1,wbxE-wbx),wbh=Math.max(1,wbyE-wby);
+  if(wbw<1||wbh<1){commitCleanup();scheduleDraw();return;}
 
-  // Union bbox: original + destination
-  const ux=Math.min(selOrig.bx,wbx),uy=Math.min(selOrig.by,wby);
-  const uxE=Math.max(selOrig.bx+selOrig.bw,wbxE);
-  const uyE=Math.max(selOrig.by+selOrig.bh,wbyE);
-  const uw=Math.min(CW-ux,uxE-ux),uh=Math.min(CH-uy,uyE-uy);
-  if(uw<1||uh<1){commitCleanup();scheduleDraw();return;}
+  // execLasso already erased the original pixels from the texture/FBO.
+  // Read the destination area (already erased state), add transformed selection on top.
+  const r8=readR8Bbox(l.fbo,wbx,wby,wbw,wbh);
 
-  // Read union region from FBO (original state, selection ink still present)
-  const r8=readR8Bbox(l.fbo,ux,uy,uw,uh);
-
-  // Erase original selection from r8
-  const selCtx=selImg.getContext('2d');
-  const selId=selCtx.getImageData(0,0,selBBox.w,selBBox.h);
-  for(let row=0;row<selBBox.h;row++){
-    const yr=selBBox.y-uy+row;
-    const fboRowU=uh-1-yr;
-    if(fboRowU<0||fboRowU>=uh)continue;
-    for(let col=0;col<selBBox.w;col++){
-      const xc=selBBox.x-ux+col;
-      if(xc<0||xc>=uw)continue;
-      if(selId.data[(row*selBBox.w+col)*4+3]>127)r8[fboRowU*uw+xc]=0;
-    }
-  }
-
-  // Render transformed selection using 2D canvas affine transform
   try{
     const warpC=document.createElement('canvas');warpC.width=wbw;warpC.height=wbh;
-    const wctx=warpC.getContext('2d',{willReadFrequently:true});
-    // Transform: origin at (cx-wbx, cy-wby), rotate, scale, draw selImg centered
-    wctx.save();
+    const wctx=warpC.getContext('2d');
     wctx.translate(cx-wbx,cy-wby);
     wctx.rotate(rot);
     wctx.scale(sx,sy);
     wctx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);
-    wctx.restore();
     const warpId=wctx.getImageData(0,0,wbw,wbh);
     for(let row=0;row<wbh;row++){
-      const yr=wby-uy+row;
-      const fboRowU=uh-1-yr;
-      if(fboRowU<0||fboRowU>=uh)continue;
+      const fboRow=wbh-1-row;
       for(let col=0;col<wbw;col++){
-        const xc=wbx-ux+col;
-        if(xc<0||xc>=uw)continue;
-        if(warpId.data[(row*wbw+col)*4+3]>127)r8[fboRowU*uw+xc]=255;
+        if(warpId.data[(row*wbw+col)*4+3]>127)r8[fboRow*wbw+col]=255;
       }
     }
-  }catch(e){console.warn('commitTransform warp failed:',e);}
+  }catch(err){console.warn('commitTransform failed:',err);}
 
-  writeR8Bbox(l.tex,ux,uy,uw,uh,r8);
+  writeR8Bbox(l.tex,wbx,wby,wbw,wbh,r8);
   commitCleanup();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
 }
 function commitCleanup(){
@@ -1316,9 +1305,8 @@ function drawSelOv(){
     sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();
   }
   if(selState==='transform'&&selImg&&selBBox&&selTx){
-    // Fill original position with bg color
-    if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
-    // Draw selection image with affine transform (translate+rotate+scale) — no mesh warp
+    // WebGL canvas already shows the erased layer (execLasso erases immediately).
+    // Just draw the floating selection image at its transformed position.
     const{cx,cy,rot,sx,sy}=selTx;
     const ctr=canvasToScreen(cx,cy);
     sovCtx.save();
@@ -2419,9 +2407,20 @@ spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true
     gl.deleteTexture(compB_tex);gl.deleteFramebuffer(compB_fbo);
     compA_tex=makeRGBATexture(screenW,screenH);compA_fbo=makeRGBAFBO(compA_tex);
     compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeRGBAFBO(compB_tex);
-    // Clamp sub-palette to new screen bounds (right-edge priority on rotation)
-    spPos.x=Math.min(spPos.x,screenW-170);
-    spPos.y=Math.max(60,Math.min(spPos.y,screenH-200));
+    // Snap sub-palette to nearest screen edge after rotation
+    // Find which edge it's closest to and align that edge to the new screen bounds
+    const spW=spMinimized?34:174,spH=spMinimized?34:220;
+    const distLeft=spPos.x;
+    const distRight=Math.abs((spPos.x+spW)-screenW);
+    const distTop=spPos.y;
+    const distBottom=Math.abs((spPos.y+spH)-screenH);
+    const minDist=Math.min(distLeft,distRight,distTop,distBottom);
+    if(minDist===distRight) spPos.x=screenW-spW; // snap to right edge
+    else if(minDist===distBottom) spPos.y=screenH-spH-10;
+    else if(minDist===distTop) spPos.y=Math.max(60,spPos.y);
+    // Always clamp within safe bounds regardless
+    spPos.x=Math.max(0,Math.min(spPos.x,screenW-spW));
+    spPos.y=Math.max(60,Math.min(spPos.y,screenH-spH-10));
     spRender();
     // Reset view to full-width — canvas coord system is device-rotation-independent
     // (WebGL canvas is fixed fullscreen; view.x/y/scale map canvas→screen in JS)
