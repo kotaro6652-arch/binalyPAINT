@@ -681,7 +681,33 @@ function initWebGL(){
   // Screen-sized composite FBOs (~3MB each, total ~6MB regardless of canvas size)
   compA_tex=makeRGBATexture(screenW,screenH);compA_fbo=makeRGBAFBO(compA_tex);
   compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeRGBAFBO(compB_tex);
+
+  // ── WebGL context loss / restore handlers ───────────────────
+  // GPU memory pressure (many large Canvas2D + WebGL textures) can cause context loss.
+  // On loss: cancel all pending GPU work. On restore: show reload prompt (full reinit required).
+  canvas.addEventListener('webglcontextlost',function(e){
+    e.preventDefault(); // required to allow restoration attempt
+    drawScheduled=false;undoBusy=false;
+    document.getElementById('undo-busy').classList.remove('show');
+    cancelSel();
+    showToast('⚠ GPU メモリ不足 — ページを再読み込みしてください');
+  },false);
+  canvas.addEventListener('webglcontextrestored',function(){
+    // Full reinit needed (all textures lost). Prompt reload rather than complex in-place reinit.
+    showToast('GPU 復帰 — ページ再読み込みを推奨します');
+  },false);
+
   return true;
+}
+
+// ── OffscreenCanvas helper ───────────────────────────────────
+// Use OffscreenCanvas when available (Safari 16.4+, Chrome 69+).
+// OffscreenCanvas is NOT GPU-backed in the same way as DOM canvas:
+// it lives in system RAM, avoiding competition with WebGL for GPU memory.
+// This is CRITICAL at 4x where selection creates 3-4 large canvases simultaneously.
+function _mkC(w,h){
+  if(typeof OffscreenCanvas!=='undefined'){try{return new OffscreenCanvas(w,h);}catch(e){}}
+  return Object.assign(document.createElement('canvas'),{width:w,height:h});
 }
 
 // ── Brush flush ─────────────────────────────────────────────
@@ -865,37 +891,11 @@ function finishStroke(){
 //  • captureNow uses setTimeout(0) to yield after touchend,
 //    so readPixels never competes with active touch input.
 // ════════════════════════════════════════════════════════════
-// ── Undo memory budget ──────────────────────────────────────
-// Full-canvas snapshots guarantee correct per-stroke undo with no ordering issues.
-// Memory budget (128MB) replaces the hard count limit.
-// CompressionStream (Safari 16.4+, Chrome 80+) adds deflate on top of packBits:
-//   sparse line art at 4x: packBits ~7.4MB → deflated ~200-600KB → 40+ steps
-//   dense fill at 4x: packBits ~7.4MB → deflated ~3-5MB → 25+ steps
-// Fallback (no CompressionStream): packBits only → ~17 steps at 4x within 128MB.
-const UNDO_MAX_STEPS=40, UNDO_MAX_MB=128;
+// ── Undo: 15 steps, full-canvas packBits snapshots, sync restore ────
+// 4x: packBits(62MB) = ~7.7MB/step × 15 = ~116MB max. No compression overhead.
+// Full-canvas snapshots guarantee correct per-stroke ordering (no bbox artifacts).
+const UNDO_MAX_STEPS=15;
 let hist=[],histIdx=-1,undoBusy=false;
-let _histBytes=0; // running byte total of all hist entries (for memory eviction)
-
-// deflate: Uint8Array → compressed Uint8Array (async, CompressionStream)
-async function _deflate(data){
-  const cs=new CompressionStream('deflate-raw');
-  const w=cs.writable.getWriter();w.write(data);w.close();
-  const chunks=[];const r=cs.readable.getReader();
-  for(;;){const{done,value}=await r.read();if(done)break;chunks.push(value);}
-  let n=0;for(const c of chunks)n+=c.length;
-  const out=new Uint8Array(n);let off=0;for(const c of chunks){out.set(c,off);off+=c.length;}
-  return out;
-}
-// inflate: compressed Uint8Array → unpacked R8 Uint8Array(CW*CH)
-async function _inflate(data,pixelCount){
-  const ds=new DecompressionStream('deflate-raw');
-  const w=ds.writable.getWriter();w.write(data);w.close();
-  const chunks=[];const r=ds.readable.getReader();
-  for(;;){const{done,value}=await r.read();if(done)break;chunks.push(value);}
-  let n=0;for(const c of chunks)n+=c.length;
-  const bits=new Uint8Array(n);let off=0;for(const c of chunks){bits.set(c,off);off+=c.length;}
-  return unpackBits(bits,pixelCount);
-}
 
 // ── Shared buffers — allocated once, reused every capture ──
 let _r8Buf=null,_r8BufPx=0;
@@ -1010,51 +1010,81 @@ async function captureNow(){
   undoBusy=true;
   document.getElementById('undo-busy').classList.add('show');
   try{
-    if(histIdx<hist.length-1){
-      // Evict trimmed-off future entries from memory total
-      const trimmed=hist.splice(histIdx+1);
-      _histBytes-=trimmed.reduce((a,s)=>a+s.reduce((b,e)=>b+e.bits.byteLength,0),0);
-    }
+    if(histIdx<hist.length-1)hist.length=histIdx+1;
     const snap=[];
-    const useDeflate=typeof CompressionStream!=='undefined';
     for(const l of gLayers){
-      // pboReadPixels: async, non-blocking GPU→CPU transfer
-      const raw=await pboReadPixels(l.fbo,CW,CH);
-      const packed=packBits(raw);
-      let bits=packed,compressed=false;
-      if(useDeflate){try{bits=await _deflate(packed);compressed=true;}catch(e){bits=packed;}}
-      snap.push({id:l.id,bits,compressed});
+      const raw=await pboReadPixels(l.fbo,CW,CH); // async PBO — non-blocking
+      snap.push({id:l.id,bits:packBits(raw)});
     }
-    hist.push(snap);histIdx++;
-    _histBytes+=snap.reduce((a,e)=>a+e.bits.byteLength,0);
-    // Evict oldest while over step-count or memory budget
-    while(hist.length>1&&(hist.length>UNDO_MAX_STEPS+1||_histBytes>UNDO_MAX_MB*1048576)){
-      const old=hist.shift();histIdx--;
-      _histBytes-=old.reduce((a,e)=>a+e.bits.byteLength,0);
-    }
-    if(histIdx<0)histIdx=0;
+    hist.push(snap);
+    if(hist.length>UNDO_MAX_STEPS+1)hist.shift();else histIdx++;
     if(openPanel==='layers')updateThumbs();
   }finally{undoBusy=false;document.getElementById('undo-busy').classList.remove('show');}
 }
 
-async function restoreSnap(snap){
+function restoreSnap(snap){
   const n=CW*CH;
-  for(const s of snap){
-    const l=gLayers.find(x=>x.id===s.id);if(!l)continue;
-    // Decompress if needed, then unpack to R8
-    const r8=s.compressed?await _inflate(s.bits,n):unpackBits(s.bits,n);
+  snap.forEach(s=>{
+    const l=gLayers.find(x=>x.id===s.id);if(!l)return;
+    const r8=unpackBits(s.bits,n);
     gl.bindTexture(gl.TEXTURE_2D,l.tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
     gl.bindTexture(gl.TEXTURE_2D,null);
     scheduleMipmap(l);
-  }
+  });
   scheduleDraw();
   if(openPanel==='layers')updateThumbs();
 }
-async function undo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx<=0){showToast('これ以上元に戻せません');return;}histIdx--;await restoreSnap(hist[histIdx]);showToast('元に戻す');}
-async function redo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx>=hist.length-1){showToast('やり直しはありません');return;}histIdx++;await restoreSnap(hist[histIdx]);showToast('やり直し');}
+function undo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx<=0){showToast('これ以上元に戻せません');return;}histIdx--;restoreSnap(hist[histIdx]);showToast('元に戻す');}
+function redo(){if(undoBusy){showToast('undo準備中…');return;}if(histIdx>=hist.length-1){showToast('やり直しはありません');return;}histIdx++;restoreSnap(hist[histIdx]);showToast('やり直し');}
 // Compatibility alias for non-stroke callers (selection, file open)
 const deferCapture=()=>setTimeout(captureNow,0);
+
+// ── CPU-side history capture for selection operations ──────────────
+// MUST be used instead of captureNow after writeR8Bbox.
+//
+// WHY: writeR8Bbox updates l.tex via texSubImage2D.
+//      captureNow calls pboReadPixels(l.fbo), which issues readPixels(l.fbo).
+//      On iOS TBR: readPixels triggers a tile-cache flush to l.tex memory.
+//      The tile cache holds stale data from the last flushBrush (before
+//      texSubImage2D), so the flush OVERWRITES our texSubImage2D data → zeros.
+//      Result: captureNow stores zeros in hist, subsequent restoreSnap
+//      writes zeros back → white-out.
+//
+// FIX: patch the previous hist entry in JS using the CPU data we already
+//      have (r8glPatch). No GPU readback → no TBR hazard.
+//
+// Params:
+//   changedLayerId : l.id of the modified layer
+//   gl_x, gl_yBase : x offset and base GL-y of patch region (gl_yBase = CH-by-bh)
+//   rw, rh         : width and height of patch region
+//   r8glPatch      : Uint8Array(rw*rh), GL bottom-up, row r → GL y = gl_yBase+r
+function _captureFromCPU(changedLayerId,gl_x,gl_yBase,rw,rh,r8glPatch){
+  if(undoBusy)return;
+  if(histIdx<hist.length-1)hist.length=histIdx+1;
+  const n=CW*CH;
+  const snap=gLayers.map(l=>{
+    const prev=(histIdx>=0)?hist[histIdx].find(s=>s.id===l.id):null;
+    if(l.id===changedLayerId){
+      // Start from previous full-canvas state (or blank), patch the bbox
+      const r8=prev?unpackBits(prev.bits,n):new Uint8Array(n);
+      for(let r=0;r<rh;r++){
+        const gy=gl_yBase+r;if(gy<0||gy>=CH)continue;
+        for(let c=0;c<rw;c++){
+          const gx=gl_x+c;if(gx<0||gx>=CW)continue;
+          r8[gy*CW+gx]=r8glPatch[r*rw+c]?255:0;
+        }
+      }
+      return{id:l.id,bits:packBits(r8)};
+    }else{
+      // Unchanged layers: reuse previous bits directly (no readback needed)
+      return{id:l.id,bits:prev?prev.bits:packBits(new Uint8Array(n))};
+    }
+  });
+  hist.push(snap);
+  if(hist.length>UNDO_MAX_STEPS+1)hist.shift();else histIdx++;
+  if(openPanel==='layers')updateThumbs();
+}
 
 // ════════════════════════════════════════════════════════════
 //  LAYERS
@@ -1243,6 +1273,25 @@ function writeR8Full(l,r8){
   scheduleMipmap(l);
   scheduleDraw();
 }
+// readR8Bbox / writeR8Bbox: sub-region read/write using WORLD coordinates (y=0 at top).
+// The FBO stores pixels with GL y=0 at the bottom, so we convert:
+//   gl_y = CH - world_y - bh   (bottom-left GL corner of the world-space rectangle)
+// This means bw*bh bytes instead of CW*CH — critical for 4x performance.
+function readR8Bbox(l,bx,by,bw,bh){
+  const buf=new Uint8Array(bw*bh);
+  const gl_y=CH-by-bh;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+  gl.readPixels(bx,gl_y,bw,bh,gl.RED,gl.UNSIGNED_BYTE,buf);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+  return buf;
+}
+function writeR8Bbox(l,bx,by,bw,bh,r8bbox){
+  const gl_y=CH-by-bh;
+  gl.bindTexture(gl.TEXTURE_2D,l.tex);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,bx,gl_y,bw,bh,gl.RED,gl.UNSIGNED_BYTE,r8bbox);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+  scheduleMipmap(l);scheduleDraw();
+}
 
 let selState=null,lassoPath=[],origLassoPath=[];
 let selBBox=null,selImg=null,selOrig=null,selTx=null,selHandle=null,selPrevPt=null,meshPts=null;
@@ -1288,15 +1337,15 @@ function applyHandle(h,psx,psy,csx,csy){
 }
 // R8 ↔ RGBA conversion helpers for 2D canvas operations
 function r8ToRGBACanvas(r8,w,h,color){
-  // r8: Uint8Array(w*h), returns Canvas element with ink as colored pixels
-  // The r8 data from readPixels is stored bottom-up in WebGL convention
-  const tc=document.createElement('canvas');tc.width=w;tc.height=h;
+  // r8: Uint8Array(w*h), returns canvas element with ink as colored pixels
+  // Uses OffscreenCanvas (non-GPU-backed) to avoid competing with WebGL for GPU memory.
+  const tc=_mkC(w,h);
   const ctx=tc.getContext('2d');
   const rgba=new Uint8ClampedArray(w*h*4);
   const[ir,ig,ib]=[Math.round(color[0]*255),Math.round(color[1]*255),Math.round(color[2]*255)];
-  // Flip Y: r8 row 0 = canvas bottom, canvas row 0 = canvas top
+  // Flip Y: r8 row 0 = GL bottom, canvas row 0 = world top
   for(let row=0;row<h;row++){
-    const srcRow=(h-1-row); // flip
+    const srcRow=(h-1-row);
     for(let col=0;col<w;col++){
       const on=r8[srcRow*w+col]>127;
       const oi=(row*w+col)*4;
@@ -1349,66 +1398,157 @@ function setSelState(s){
 function execLasso(){
   const l=gLayers[gActiveIdx];
   if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
-  // NOTE: captureNow is called at the END after writeR8Full.
-  // Capturing before would record pre-erase state as hist[N], making redo wrong.
+  // ── Strict bbox clamped to canvas bounds ──
   const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
-  let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
-  let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
+  const bx=Math.max(0,Math.floor(Math.min(...xs)));
+  const by=Math.max(0,Math.floor(Math.min(...ys)));
+  const bx2=Math.min(CW,Math.ceil(Math.max(...xs))+1);
+  const by2=Math.min(CH,Math.ceil(Math.max(...ys))+1);
+  const bw=bx2-bx,bh=by2-by;
   if(bw<4||bh<4){lassoPath=[];setSelState(null);showToast('選択範囲が小さすぎます');return;}
   selBBox={x:bx,y:by,w:bw,h:bh};origLassoPath=[...lassoPath];
-  // Read R8 layer (use shared buf only if it fits; otherwise alloc temp)
-  const r8=new Uint8Array(CW*CH); // R8 is just CW*CH bytes
-  r8.set(readR8Full(l)); // iOS TBR safe
-  // Convert to RGBA canvas for 2D operations
-  const fullCanvas=r8ToRGBACanvas(r8,CW,CH,l.color);
-  // Lasso mask
-  const mc=document.createElement('canvas');mc.width=bw;mc.height=bh;const mctx=mc.getContext('2d');
-  mctx.fillStyle='#fff';mctx.beginPath();
-  lassoPath.forEach((p,i)=>{i?mctx.lineTo(p.x-bx,p.y-by):mctx.moveTo(p.x-bx,p.y-by);});
-  mctx.closePath();mctx.fill();
-  // Extract selection
-  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;const ectx=ec.getContext('2d');
-  ectx.drawImage(mc,0,0);ectx.globalCompositeOperation='source-in';ectx.drawImage(fullCanvas,-bx,-by);selImg=ec;
-  // Erase selection from full canvas then upload back to R8
-  const fc2=document.createElement('canvas');fc2.width=CW;fc2.height=CH;const fc2ctx=fc2.getContext('2d');
-  fc2ctx.drawImage(fullCanvas,0,0);fc2ctx.globalCompositeOperation='destination-out';fc2ctx.drawImage(mc,bx,by);
-  const r8new=canvasToR8(fc2,CW,CH);
-  writeR8Full(l,r8new); // iOS TBR safe
-  selOrig={r8:new Uint8Array(r8),layerId:l.id};
+
+  // ── Step 1: read bbox from GPU (GL bottom-up) ──
+  const r8gl=readR8Bbox(l,bx,by,bw,bh);
+
+  // ── Step 2: Pure JS point-in-polygon mask — NO Canvas2D, NO 16M pixel limit ──
+  // Ray casting algorithm: for each pixel center, count crossings of lasso edges.
+  // Lasso path is in world canvas coords; pixel (col,row) has world coords (bx+col+0.5, by+row+0.5).
+  // Clamp lasso vertices to bbox to avoid winding issues from out-of-canvas coords.
+  const poly=lassoPath.map(p=>({
+    x:Math.max(bx-1,Math.min(bx2+1,p.x)),
+    y:Math.max(by-1,Math.min(by2+1,p.y))
+  }));
+  const pn=poly.length;
+
+  // ── Step 3: split pixels via typed arrays + raycaster ──
+  const[ir,ig,ib]=l.color.map(v=>Math.round(v*255));
+  const selRGBA=new Uint8ClampedArray(bw*bh*4);
+  const erasedR8gl=new Uint8Array(bw*bh);
+  for(let row=0;row<bh;row++){
+    const wy=by+row+0.5; // world Y of pixel center (top-down)
+    const glRow=bh-1-row;
+    for(let col=0;col<bw;col++){
+      const wx=bx+col+0.5; // world X of pixel center
+      // Ray casting: horizontal ray from (wx,wy) to +X
+      let inside=false;
+      for(let i=0,j=pn-1;i<pn;j=i++){
+        const xi=poly[i].x,yi=poly[i].y,xj=poly[j].x,yj=poly[j].y;
+        if(((yi>wy)!==(yj>wy))&&(wx<(xj-xi)*(wy-yi)/(yj-yi)+xi))inside=!inside;
+      }
+      const ink=r8gl[glRow*bw+col]>127;
+      const wi=(row*bw+col)*4;
+      if(ink&&inside){selRGBA[wi]=ir;selRGBA[wi+1]=ig;selRGBA[wi+2]=ib;selRGBA[wi+3]=255;}
+      erasedR8gl[glRow*bw+col]=(ink&&!inside)?255:0;
+    }
+  }
+
+  // ── Step 4: selImg is null — drawSelOv rebuilds from selRGBA each frame ──
+  selImg=null;
+
+  // ── Step 5: upload erased bbox to GPU ──
+  writeR8Bbox(l,bx,by,bw,bh,erasedR8gl);
+  selOrig={r8bbox:new Uint8Array(r8gl),erasedR8gl,selRGBA,layerId:l.id};
   selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');scheduleDraw();
-  setTimeout(captureNow,0); // capture post-erase state → correct undo AND redo targets
+  // Use CPU-side hist capture (no GPU readback → no TBR tile-cache hazard)
+  _captureFromCPU(l.id, bx, CH-by-bh, bw, bh, erasedR8gl);
 }
 function commitTransform(){
-  if(!selImg||!selBBox||!selTx||!selOrig)return;
+  if(!selOrig||!selOrig.selRGBA||!selBBox||!selTx)return;
   const l=gLayers[gActiveIdx];if(!l||l.id!==selOrig.layerId)return;
-  // Use selOrig.r8 as base — no FBO read needed (avoids iOS TBR stale data)
-  const baseC=r8ToRGBACanvas(selOrig.r8,CW,CH,l.color);
-  const baseCtx=baseC.getContext('2d');
-  // Erase original selection area from base
-  const eraseMc=document.createElement('canvas');eraseMc.width=selBBox.w;eraseMc.height=selBBox.h;
-  const emCtx=eraseMc.getContext('2d');
-  emCtx.fillStyle='#fff';emCtx.beginPath();
-  origLassoPath.forEach((p,i)=>{i?emCtx.lineTo(p.x-selBBox.x,p.y-selBBox.y):emCtx.moveTo(p.x-selBBox.x,p.y-selBBox.y);});
-  emCtx.closePath();emCtx.fill();
-  baseCtx.globalCompositeOperation='destination-out';
-  baseCtx.drawImage(eraseMc,selBBox.x,selBBox.y);
-  baseCtx.globalCompositeOperation='source-over';
-  // Draw transformed selection (affine: translate+rotate+scale)
   const{cx,cy,rot,sx,sy}=selTx;
-  baseCtx.save();
-  baseCtx.translate(cx,cy);
-  baseCtx.rotate(rot);
-  baseCtx.scale(sx,sy);
-  baseCtx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);
-  baseCtx.restore();
-  const r8new=canvasToR8(baseC,CW,CH);
-  writeR8Full(l,r8new); // iOS TBR safe
-  selOrig=null;
-  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
-  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();scheduleDraw();setTimeout(captureNow,0);showToast('変形確定');
+  const{x:bx,y:by,w:bw,h:bh}=selBBox;
+
+  // ── Dest bbox (world coords, clamped to canvas) ──
+  const hw=bw/2,hh=bh/2,cosR=Math.cos(rot),sinR=Math.sin(rot);
+  const corners=[[-hw*sx,-hh*sy],[hw*sx,-hh*sy],[hw*sx,hh*sy],[-hw*sx,hh*sy]];
+  const txs=corners.map(([dx,dy])=>cx+dx*cosR-dy*sinR);
+  const tys=corners.map(([dx,dy])=>cy+dx*sinR+dy*cosR);
+  const dx1=Math.max(0,Math.floor(Math.min(...txs))-1);
+  const dy1=Math.max(0,Math.floor(Math.min(...tys))-1);
+  const dx2=Math.min(CW,Math.ceil(Math.max(...txs))+1);
+  const dy2=Math.min(CH,Math.ceil(Math.max(...tys))+1);
+  const dw=dx2-dx1,dh=dy2-dy1;
+
+  // ── Pure JS inverse-affine sampling — NO Canvas2D, NO 16M limit ──
+  // For each dest pixel (world top-down), invert the transform to find
+  // the source pixel in selRGBA (also world top-down):
+  //   Forward: local(u,v) → world(wx,wy)
+  //     lx=(u-bw/2)*sx, ly=(v-bh/2)*sy
+  //     wx = cosR*lx - sinR*ly + cx
+  //     wy = sinR*lx + cosR*ly + cy
+  //   Inverse: world(wx,wy) → local(u,v)
+  //     dx=wx-cx, dy=wy-cy
+  //     lx =  cosR*dx + sinR*dy
+  //     ly = -sinR*dx + cosR*dy
+  //     u = lx/sx + bw/2
+  //     v = ly/sy + bh/2
+  let destR8gl=null;
+  if(dw>0&&dh>0){
+    destR8gl=new Uint8Array(dw*dh);
+    const invSx=(sx!==0)?1/sx:0,invSy=(sy!==0)?1/sy:0;
+    for(let row=0;row<dh;row++){
+      const wy=dy1+row+0.5; // world Y (top-down, pixel center)
+      const glRow=dh-1-row; // GL bottom-up row in destR8gl
+      const ddy=wy-cy;
+      for(let col=0;col<dw;col++){
+        const wx=dx1+col+0.5;
+        const ddx=wx-cx;
+        const lx= cosR*ddx+sinR*ddy;
+        const ly=-sinR*ddx+cosR*ddy;
+        const u=lx*invSx+hw; // selRGBA column (0-based, world-left)
+        const v=ly*invSy+hh; // selRGBA row (0-based, world-top-down)
+        const iu=u|0,iv=v|0; // nearest-neighbour
+        if(iu>=0&&iu<bw&&iv>=0&&iv<bh){
+          // selRGBA is world top-down; alpha channel at index [iv*bw+iu]*4+3
+          if(selOrig.selRGBA[(iv*bw+iu)*4+3]>127)destR8gl[glRow*dw+col]=255;
+        }
+      }
+    }
+  }
+
+  // ── Union bbox = selBBox ∪ dest bbox ──
+  const ux=Math.max(0,Math.min(bx,dx1)),uy=Math.max(0,Math.min(by,dy1));
+  const ux2=Math.min(CW,Math.max(bx+bw,dx2)),uy2=Math.min(CH,Math.max(by+bh,dy2));
+  const uw=ux2-ux,uh=uy2-uy;
+  if(uw<=0||uh<=0){_finishSel();return;}
+
+  // ── Build unionR8gl via typed arrays (TBR-safe, no canvas) ──
+  const unionR8gl=new Uint8Array(uw*uh);
+  // Fill from GPU only where outside selBBox (TBR-safe region)
+  if(ux<bx||uy<by||ux2>bx+bw||uy2>by+bh){
+    unionR8gl.set(readR8Bbox(l,ux,uy,uw,uh));
+  }
+  // Overwrite selBBox region with erasedR8gl (JS-stored, TBR-safe)
+  {const rOff=(uy+uh)-(by+bh),cOff=bx-ux;
+  for(let r=0;r<bh;r++){const uR=rOff+r;if(uR<0||uR>=uh)continue;
+    for(let c=0;c<bw;c++){const uC=cOff+c;if(uC<0||uC>=uw)continue;
+      unionR8gl[uR*uw+uC]=selOrig.erasedR8gl[r*bw+c];}}}
+  // OR-merge destR8gl
+  if(destR8gl&&dw>0&&dh>0){
+    const rOff=(uy+uh)-(dy1+dh),cOff=dx1-ux;
+    for(let r=0;r<dh;r++){const uR=rOff+r;if(uR<0||uR>=uh)continue;
+      for(let c=0;c<dw;c++){const uC=cOff+c;if(uC<0||uC>=uw)continue;
+        if(destR8gl[r*dw+c]>127)unionR8gl[uR*uw+uC]=255;}}}
+
+  writeR8Bbox(l,ux,uy,uw,uh,unionR8gl);
+  _finishSel();
+  // Use CPU-side hist capture — avoids iOS TBR tile-cache → l.tex corruption
+  _captureFromCPU(l.id, ux, CH-uy-uh, uw, uh, unionR8gl);
+  showToast('変形確定');
+}
+function _finishSel(){
+  selOrig=null;selState=null;selBBox=null;selImg=null;selTx=null;
+  meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
+  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();scheduleDraw();
 }
 function cancelSel(){
-  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];
+  // If transform is active, restore the bbox to pre-erase state (undo the execLasso erase)
+  if(selState==='transform'&&selOrig&&selBBox&&selOrig.r8bbox){
+    const l=gLayers.find(x=>x.id===selOrig.layerId);
+    if(l)writeR8Bbox(l,selBBox.x,selBBox.y,selBBox.w,selBBox.h,selOrig.r8bbox);
+  }
+  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];selOrig=null;
   document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();
 }
 function drawSelOv(){
@@ -1417,9 +1557,41 @@ function drawSelOv(){
     sovCtx.save();sovCtx.strokeStyle='rgba(91,156,246,.9)';sovCtx.lineWidth=2;sovCtx.setLineDash([5,4]);
     sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();
   }
-  if(selState==='transform'&&selImg&&selBBox&&selTx){
-    if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
-    drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
+  if(selState==='transform'&&selOrig&&selOrig.selRGBA&&selBBox&&selTx){
+    if(origLassoPath.length>2){
+      // Clip bgColor fill to canvas viewport — prevents fill bleeding outside canvas bounds
+      const _tl=canvasToScreen(0,0),_tr=canvasToScreen(CW,0),_bl=canvasToScreen(0,CH),_br=canvasToScreen(CW,CH);
+      sovCtx.save();
+      sovCtx.beginPath();sovCtx.moveTo(_tl.x,_tl.y);sovCtx.lineTo(_tr.x,_tr.y);sovCtx.lineTo(_br.x,_br.y);sovCtx.lineTo(_bl.x,_bl.y);sovCtx.closePath();sovCtx.clip();
+      sovCtx.fillStyle=bgColor;sovCtx.beginPath();
+      origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});
+      sovCtx.closePath();sovCtx.fill();
+      sovCtx.restore();
+    }
+    // ── Selection overlay: draw from selRGBA typed array ──────────────────
+    // CRITICAL: Safari hoards detached Canvas elements; each frame creates one here.
+    // Fix: (a) cap canvas size to iOS 16M pixel limit, (b) shrink to 0 after use to
+    // force Safari to release memory immediately.
+    const IOS_CANVAS_MAX_PX = 16777216; // 4096×4096
+    const bw=selBBox.w,bh=selBBox.h;
+    const tooLarge=(bw*bh>IOS_CANVAS_MAX_PX);
+    if(!tooLarge){
+      // Build a tiny canvas from selRGBA, use it for drawMeshWarp, then immediately release
+      const _drawSel=document.createElement('canvas');_drawSel.width=bw;_drawSel.height=bh;
+      _drawSel.getContext('2d').putImageData(new ImageData(selOrig.selRGBA,bw,bh),0,0);
+      drawMeshWarp(sovCtx,_drawSel,bw,bh,(r,c)=>meshPtS(r,c));
+      // Force Safari to release canvas memory immediately (not "when it feels like it")
+      _drawSel.width=1;_drawSel.height=1;
+    } else {
+      // Selection too large for iOS canvas — draw outline only (no pixel preview)
+      // The lasso outline + transform handles still render below
+      sovCtx.save();sovCtx.strokeStyle='rgba(249,115,22,.6)';sovCtx.lineWidth=2/view.scale;
+      sovCtx.beginPath();
+      const _tl2=canvasToScreen(selBBox.x,selBBox.y),_tr2=canvasToScreen(selBBox.x+bw,selBBox.y);
+      const _bl2=canvasToScreen(selBBox.x,selBBox.y+bh),_br2=canvasToScreen(selBBox.x+bw,selBBox.y+bh);
+      sovCtx.moveTo(_tl2.x,_tl2.y);sovCtx.lineTo(_tr2.x,_tr2.y);sovCtx.lineTo(_br2.x,_br2.y);sovCtx.lineTo(_bl2.x,_bl2.y);sovCtx.closePath();sovCtx.stroke();
+      sovCtx.restore();
+    }
     const H=getHandles(),corners=[H.TL,H.TR,H.BR,H.BL];
     sovCtx.save();sovCtx.strokeStyle='rgba(249,115,22,.8)';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);
     sovCtx.beginPath();corners.forEach((p,i)=>i?sovCtx.lineTo(p.x,p.y):sovCtx.moveTo(p.x,p.y));sovCtx.closePath();sovCtx.stroke();
@@ -1640,7 +1812,7 @@ document.getElementById('reset-view-btn').addEventListener('pointerdown',e=>{e.p
 // ── 新規作成 ────────────────────────────────────────────────
 function doNewCanvas(){
   gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
-  _r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;_histBytes=0;
+  _r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
   addGLLayer('レイヤー 1','#000000');
   fitView();setTimeout(captureNow,0);renderLayers();
   document.getElementById('sz-cur').textContent=CW+'×'+CH;
@@ -1855,7 +2027,7 @@ function renderLayers(){
       gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);
       gLayers.splice(i,1);gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
       // Purge orphan undo entries for deleted layer
-      hist=[];histIdx=-1;_histBytes=0;
+      hist=[];histIdx=-1;
       scheduleDraw();renderLayers();showToast('レイヤーを削除');});
     item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
     list.appendChild(item);
@@ -1882,7 +2054,7 @@ document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
   e.preventDefault();e.stopPropagation();
   if(gLayers.length>=3){showToast('レイヤーは最大3枚まで（メモリ保護）');return;}
   addGLLayer('レイヤー '+(gLayers.length+1),'#000000');
-  hist=[];histIdx=-1;_histBytes=0;
+  hist=[];histIdx=-1;
   scheduleDraw();setTimeout(captureNow,0);renderLayers();
 });
 
@@ -1895,7 +2067,7 @@ document.getElementById('file-input').addEventListener('change',function(){
   reader.onload=ev=>{const img=new Image();img.onload=()=>{
     const l=gLayers[gActiveIdx];if(!l)return;
     const scale=Math.min(CW/img.width,CH/img.height),sw=Math.round(img.width*scale),sh=Math.round(img.height*scale),ox=Math.round((CW-sw)/2),oy=Math.round((CH-sh)/2);
-    const tc=document.createElement('canvas');tc.width=CW;tc.height=CH;
+    const tc=_mkC(CW,CH);
     tc.getContext('2d').drawImage(img,ox,oy,sw,sh);
     // Convert to R8: alpha>0 → ink, else empty (Y-flip for WebGL FBO)
     const id=tc.getContext('2d').getImageData(0,0,CW,CH);
@@ -1929,7 +2101,7 @@ szConfirm.addEventListener('pointerdown',async e=>{
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
 
     // Convert R8→RGBA canvas (flip Y: WebGL bottom-up→canvas top-down)
-    const srcC=document.createElement('canvas');srcC.width=oldCW;srcC.height=oldCH;
+    const srcC=_mkC(oldCW,oldCH);
     const srcCtx=srcC.getContext('2d');
     const rgba=new Uint8ClampedArray(oldCW*oldCH*4);
     for(let row=0;row<oldCH;row++){
@@ -1943,7 +2115,7 @@ szConfirm.addEventListener('pointerdown',async e=>{
     srcCtx.putImageData(new ImageData(rgba,oldCW,oldCH),0,0);
 
     // Scale to new size using 2D canvas drawImage (bilinear)
-    const dstC=document.createElement('canvas');dstC.width=w;dstC.height=h;
+    const dstC=_mkC(w,h);
     const dstCtx=dstC.getContext('2d');
     dstCtx.imageSmoothingEnabled=true;
     dstCtx.imageSmoothingQuality='high';
@@ -1964,7 +2136,7 @@ szConfirm.addEventListener('pointerdown',async e=>{
 
   // Step 2: destroy old GL resources
   gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});
-  gLayers=[];_r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;_histBytes=0;
+  gLayers=[];_r8Buf=null;_r8BufPx=0;hist=[];histIdx=-1;
 
   // Step 3: set new canvas size
   CW=w;CH=h;
@@ -2003,7 +2175,7 @@ document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
     const r8=new Uint8Array(CW*CH);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     // Convert R8 to black-on-white PNG (flip Y)
-    const tc=document.createElement('canvas');tc.width=CW;tc.height=CH;
+    const tc=_mkC(CW,CH);
     const tctx=tc.getContext('2d');tctx.fillStyle='#ffffff';tctx.fillRect(0,0,CW,CH);
     const rgba=new Uint8ClampedArray(CW*CH*4);
     for(let row=0;row<CH;row++){
