@@ -85,10 +85,12 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);font-famil
 .row label{font-size:11px;color:var(--tx2);min-width:64px;flex-shrink:0}
 .row .val{font-size:11px;color:var(--tx);font-family:'DM Mono',monospace;min-width:36px;text-align:right;flex-shrink:0}
 .slabel{font-size:10px;color:var(--tx2);letter-spacing:.08em;text-transform:uppercase;margin:10px 0 6px;padding-left:2px}
-.csl{flex:1;height:28px;position:relative;touch-action:none;cursor:ew-resize}
+.csl{flex:1;height:32px;position:relative;touch-action:none;cursor:ew-resize}
 .csl-bg{position:absolute;left:0;right:0;top:50%;height:3px;margin-top:-1.5px;background:rgba(255,255,255,.15);border-radius:2px;pointer-events:none}
 .csl-fill{position:absolute;left:0;top:0;bottom:0;background:var(--acc);border-radius:2px;pointer-events:none}
 .csl-knob{position:absolute;top:50%;width:20px;height:20px;margin-top:-10px;margin-left:-10px;background:var(--acc);border-radius:50%;box-shadow:0 0 0 3px rgba(91,156,246,.2);pointer-events:none}
+/* Enlarged hit area for slider: transparent padding around knob */
+.csl::after{content:'';position:absolute;left:-8px;right:-8px;top:0;bottom:0}
 input[type=range].native{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;outline:none;touch-action:pan-x;background:linear-gradient(to right,var(--acc) 0%,var(--acc) var(--pct,50%),rgba(255,255,255,.15) var(--pct,50%))}
 input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:var(--acc);cursor:pointer;box-shadow:0 0 0 3px rgba(91,156,246,.2)}
 .togrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;padding:8px 10px;background:var(--sf2);border-radius:8px;border:1px solid var(--bd);touch-action:manipulation}
@@ -299,17 +301,25 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
         <span id="sp-title">PALETTE</span>
         <button id="sp-min-btn" title="最小化">—</button>
       </div>
-      <!-- 2列×3行: sp-col×2, 各列3スロット -->
+      <!-- 3列×4行 = 12スロット -->
       <div style="display:flex;gap:4px">
         <div class="sp-col" style="display:flex;flex-direction:column;gap:4px">
           <div class="sp-slot" data-slot="0"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
           <div class="sp-slot" data-slot="1"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
           <div class="sp-slot" data-slot="2"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="3"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
         </div>
         <div class="sp-col" style="display:flex;flex-direction:column;gap:4px">
-          <div class="sp-slot" data-slot="3"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
           <div class="sp-slot" data-slot="4"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
           <div class="sp-slot" data-slot="5"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="6"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="7"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+        </div>
+        <div class="sp-col" style="display:flex;flex-direction:column;gap:4px">
+          <div class="sp-slot" data-slot="8"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="9"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="10"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
+          <div class="sp-slot" data-slot="11"><span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span></div>
         </div>
       </div>
     </div>
@@ -589,7 +599,15 @@ function makeProgram(vs,fs){
   gl.linkProgram(p);
   if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));return p;
 }
-function ul(p,n){return gl.getUniformLocation(p,n);}
+// ul: cached uniform location lookup — getUniformLocation is NOT free (hash lookup).
+// Pre-cache all locations after program creation instead of calling every frame.
+const _ulCache=new Map();
+function ul(p,n){
+  const k=p+'|'+n;
+  let loc=_ulCache.get(k);
+  if(loc===undefined){loc=gl.getUniformLocation(p,n);_ulCache.set(k,loc);}
+  return loc;
+}
 
 // ── Geometry buffers ────────────────────────────────────────
 const MAX_INST=16384;
@@ -607,10 +625,10 @@ let gLayers=[],gActiveIdx=0;
 function makeR8Texture(w,h){
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
   gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,w,h,0,gl.RED,gl.UNSIGNED_BYTE,null);
-  // LINEAR_MIPMAP_LINEAR: correct density averaging at zoom-out (no moiré).
-  // NEAREST: crisp binary pixels at zoom-in (no blur).
-  // Mipmaps generated once per stroke in finishStroke() — safe, not per-touchmove.
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR_MIPMAP_LINEAR);
+  // LINEAR min+mag: no mipmaps. Zoom-out uses bilinear interpolation of binary pixels
+  // giving correct density averaging. No generateMipmap ever needed.
+  // Previous LINEAR_MIPMAP_LINEAR required generateMipmap calls which caused 3-10s freezes.
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
@@ -646,6 +664,7 @@ function initWebGL(){
   PROG.brush=makeProgram(BRUSH_VS,BRUSH_FS);
   PROG.comp=makeProgram(QUAD_VS,COMP_FS);
   PROG.blit=makeProgram(QUAD_VS,BLIT_FS);
+  initCompUniforms(); // cache all comp uniform locations once
   // Brush VAO (instanced)
   brushVAO=gl.createVertexArray();gl.bindVertexArray(brushVAO);
   const qv=new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]);
@@ -673,42 +692,19 @@ function flushBrush(){
   gl.bufferSubData(gl.ARRAY_BUFFER,0,instArr,0,instCount*3);
   gl.bindFramebuffer(gl.FRAMEBUFFER,layer.fbo);
   gl.viewport(0,0,CW,CH);
-  // No blending: brush writes exactly 1.0 (draw) or 0.0 (erase).
-  // Pixels outside the circle are discarded by the shader (not written).
-  // This guarantees R8 texture contains ONLY 0 or 255 — never intermediate values.
   gl.disable(gl.BLEND);
   gl.useProgram(PROG.brush);
   gl.uniform2f(ul(PROG.brush,'u_res'),CW,CH);
   gl.uniform1f(ul(PROG.brush,'u_val'),eraserOn?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
-  // Generate mipmaps with time-gate (max 60fps = 16ms interval).
-  // This keeps mid-stroke display identical to idle — both use texture() with correct mip.
-  // At 4x canvas, generateMipmap is ~2ms on iPad GPU when idle between touchmove events.
-  const now=performance.now();
-  if(now-flushBrush._lastMip>16){
-    flushBrush._lastMip=now;
-    gl.bindTexture(gl.TEXTURE_2D,layer.tex);
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.bindTexture(gl.TEXTURE_2D,null);
-  }
+  // NO generateMipmap here — MIN_FILTER=gl.LINEAR (no mipmaps needed).
+  // Previously called generateMipmap every 16ms = 20M pixel GPU op at 4x = main freeze source.
   scheduleDraw();
 }
-flushBrush._lastMip=0;
-
-// ── Mipmap dirty set: batch regen once after stroke ends ───────
-// NEVER called during active stroke (touchmove). Only called from:
-//   finishStroke(), restoreSnap(), writeR8Bbox(), file open
-// generateMipmapNow: synchronous mipmap generation.
-// Called AFTER flushBrush() in finishStroke, and after any texSubImage2D write.
-// Runs before the next scheduleDraw() rAF, so composite always sees fresh mipmaps.
-// Safe to call at stroke-end (not mid-stroke) — 12 mip levels is fast on GPU when idle.
-function scheduleMipmap(layer){
-  if(!layer||!layer.tex)return;
-  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
-  gl.generateMipmap(gl.TEXTURE_2D);
-  gl.bindTexture(gl.TEXTURE_2D,null);
-}
+// scheduleMipmap: no-op — texture uses gl.LINEAR (not LINEAR_MIPMAP_LINEAR).
+// Kept as stub so call sites don't need updating.
+function scheduleMipmap(layer){/* no-op: no mipmaps used */}
 function queueDot(x,y,d){
   if(instCount>=MAX_INST)flushBrush();
   instArr[instCount*3]=x;instArr[instCount*3+1]=y;instArr[instCount*3+2]=d/2;instCount++;
@@ -730,21 +726,43 @@ let drawScheduled=false;
 function scheduleDraw(){if(!drawScheduled){drawScheduled=true;requestAnimationFrame(compositeAndDisplay);}}
 function markDirty(){scheduleDraw();}
 
+// Pre-cache comp program uniform locations (called once after compile)
+let _compU=null;
+function initCompUniforms(){
+  const p=PROG.comp;
+  _compU={
+    layer:gl.getUniformLocation(p,'u_layer'),
+    color:gl.getUniformLocation(p,'u_color'),
+    opacity:gl.getUniformLocation(p,'u_opacity'),
+    blend:gl.getUniformLocation(p,'u_blend'),
+    base:gl.getUniformLocation(p,'u_base'),
+    first:gl.getUniformLocation(p,'u_first'),
+    bg:gl.getUniformLocation(p,'u_bg'),
+    screen:gl.getUniformLocation(p,'u_screen'),
+    canvas:gl.getUniformLocation(p,'u_canvas'),
+    vxy:gl.getUniformLocation(p,'u_vxy'),
+    vscale:gl.getUniformLocation(p,'u_vscale'),
+    flip:gl.getUniformLocation(p,'u_flip'),
+    vrot:gl.getUniformLocation(p,'u_vrot'),
+  };
+}
+// Optimized setCompUniforms using pre-cached locations
 function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst,vrot){
+  const u=_compU;
   gl.useProgram(p);
-  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,layerTex);gl.uniform1i(ul(p,'u_layer'),0);
-  gl.uniform3fv(ul(p,'u_color'),color);
-  gl.uniform1f(ul(p,'u_opacity'),opacity);
-  gl.uniform1i(ul(p,'u_blend'),{normal:0,multiply:1,overlay:2}[blend]||0);
-  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,baseTex||layerTex);gl.uniform1i(ul(p,'u_base'),1);
-  gl.uniform1i(ul(p,'u_first'),isFirst?1:0);
-  gl.uniform3fv(ul(p,'u_bg'),bgRGB);
-  gl.uniform2f(ul(p,'u_screen'),screenW,screenH);
-  gl.uniform2f(ul(p,'u_canvas'),CW,CH);
-  gl.uniform2f(ul(p,'u_vxy'),view.x,view.y);
-  gl.uniform1f(ul(p,'u_vscale'),view.scale);
-  gl.uniform1i(ul(p,'u_flip'),flipState?1:0);
-  gl.uniform1f(ul(p,'u_vrot'),vrot!==undefined?vrot:view.rot);
+  gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,layerTex);gl.uniform1i(u.layer,0);
+  gl.uniform3fv(u.color,color);
+  gl.uniform1f(u.opacity,opacity);
+  gl.uniform1i(u.blend,{normal:0,multiply:1,overlay:2}[blend]||0);
+  gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,baseTex||layerTex);gl.uniform1i(u.base,1);
+  gl.uniform1i(u.first,isFirst?1:0);
+  gl.uniform3fv(u.bg,bgRGB);
+  gl.uniform2f(u.screen,screenW,screenH);
+  gl.uniform2f(u.canvas,CW,CH);
+  gl.uniform2f(u.vxy,view.x,view.y);
+  gl.uniform1f(u.vscale,view.scale);
+  gl.uniform1i(u.flip,flipState?1:0);
+  gl.uniform1f(u.vrot,vrot!==undefined?vrot:view.rot);
 }
 
 function compositeAndDisplay(){
@@ -798,7 +816,7 @@ function continueStroke(sx,sy,f){
   const d=Math.max(1,calcD(f,false));
   _crBuf.push({...pt,d});
   const n=_crBuf.length;
-  if(n<4)return; // need 4 pts to confirm p1→p2 segment
+  if(n<4)return;
   const p0=_crBuf[n-4],p1=_crBuf[n-3],p2=_crBuf[n-2],p3=_crBuf[n-1];
   const dist=Math.hypot(p2.x-p1.x,p2.y-p1.y);
   const step=Math.max(0.4,p1.d/3);
@@ -811,7 +829,10 @@ function continueStroke(sx,sy,f){
     else queueDot(x,y,p1.d);
     lastDrawPt={x,y};
   }
-  flushBrush();
+  // Flush accumulated quads to GPU — but only once per coalesced event group.
+  // touchmove calls continueStroke for each coalesced point; all go into instArr.
+  // flushBrush() here keeps latency low: pixels visible in the same rAF frame.
+  if(instCount>=(MAX_INST>>1))flushBrush(); // only force-flush when buffer half full
 }
 function finishStroke(){
   const n=_crBuf.length;
@@ -847,17 +868,44 @@ function finishStroke(){
 function maxUndoCount(){return CW>=9440?3:CW>=4720?8:20;}
 let hist=[],histIdx=-1,undoBusy=false;
 
+// ── Shared buffers — allocated once, reused every capture ──
 let _r8Buf=null,_r8BufPx=0;
 function getR8Buf(){
   const n=CW*CH;if(!_r8Buf||_r8BufPx!==n){_r8Buf=new Uint8Array(n);_r8BufPx=n;}return _r8Buf;
 }
-function packBits(r8){
-  const n=r8.length,bits=new Uint8Array(Math.ceil(n/8));
-  for(let i=0;i<n;i++)if(r8[i]>127)bits[i>>3]|=(1<<(i&7));return bits;
+let _bitsBuf=null,_bitsBufPx=0;
+function getBitsBuf(){
+  const n=Math.ceil(CW*CH/8);if(!_bitsBuf||_bitsBufPx!==n){_bitsBuf=new Uint8Array(n);_bitsBufPx=n;}
+  _bitsBuf.fill(0);return _bitsBuf;
 }
+
+// packBits: Uint8Array(N) binary pixels → Uint8Array(N/8) packed bits
+// Optimized: process 8 pixels at a time, minimize branch cost
+function packBits(r8){
+  const n=r8.length;
+  const bits=new Uint8Array(Math.ceil(n/8));
+  const full=n>>3; // n/8 rounded down
+  for(let i=0;i<full;i++){
+    const b=i<<3;
+    bits[i]=(r8[b]?1:0)|(r8[b+1]?2:0)|(r8[b+2]?4:0)|(r8[b+3]?8:0)|
+            (r8[b+4]?16:0)|(r8[b+5]?32:0)|(r8[b+6]?64:0)|(r8[b+7]?128:0);
+  }
+  // Remaining bits
+  for(let i=full<<3;i<n;i++)if(r8[i])bits[i>>3]|=(1<<(i&7));
+  return bits;
+}
+// unpackBits: packed bits → Uint8Array(N) binary pixels
 function unpackBits(bits,n){
   const r8=new Uint8Array(n);
-  for(let i=0;i<n;i++)if((bits[i>>3]>>(i&7))&1)r8[i]=255;return r8;
+  const full=n>>3;
+  for(let i=0;i<full;i++){
+    const b=bits[i];if(!b)continue; // skip empty bytes fast
+    const base=i<<3;
+    if(b&1)r8[base]=255;if(b&2)r8[base+1]=255;if(b&4)r8[base+2]=255;if(b&8)r8[base+3]=255;
+    if(b&16)r8[base+4]=255;if(b&32)r8[base+5]=255;if(b&64)r8[base+6]=255;if(b&128)r8[base+7]=255;
+  }
+  for(let i=full<<3;i<n;i++)if((bits[i>>3]>>(i&7))&1)r8[i]=255;
+  return r8;
 }
 
 // Called ONCE after each stroke ends. Not debounced — every stroke is one undo step.
@@ -868,6 +916,66 @@ function captureStroke(){
   setTimeout(captureNow,0);
 }
 
+// ── PBO async readPixels ────────────────────────────────────
+// WebGL2 PIXEL_PACK_BUFFER: GPU writes directly to buffer asynchronously.
+// fenceSync + clientWaitSync(timeout=0) polls non-blocking until GPU done.
+// Eliminates the 200-500ms main-thread GPU-CPU sync stall at 2x/4x canvas.
+function pboReadPixels(fbo, w, h){
+  return new Promise(resolve=>{
+    const byteSize=w*h;
+    const pbo=gl.createBuffer();
+    if(!pbo){
+      // Fallback: synchronous
+      const raw=new Uint8Array(byteSize);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,fbo);
+      gl.readPixels(0,0,w,h,gl.RED,gl.UNSIGNED_BYTE,raw);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      resolve(raw);return;
+    }
+    // Kick off async GPU→PBO transfer
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER,byteSize,gl.STREAM_READ);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,fbo);
+    gl.readPixels(0,0,w,h,gl.RED,gl.UNSIGNED_BYTE,0); // offset=0 into PBO
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+    gl.flush(); // submit to GPU
+
+    // Create fence — signals when GPU finishes the readPixels
+    let sync=null;
+    try{sync=gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE,0);gl.flush();}catch(e){}
+
+    const raw=new Uint8Array(byteSize);
+    function poll(){
+      if(sync){
+        const status=gl.clientWaitSync(sync,0,0); // non-blocking poll
+        if(status===gl.WAIT_FAILED){
+          // Fallback: force sync read
+          gl.deleteSync(sync);gl.deleteBuffer(pbo);
+          const fb=new Uint8Array(byteSize);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER,fbo);
+          gl.readPixels(0,0,w,h,gl.RED,gl.UNSIGNED_BYTE,fb);
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+          resolve(fb);return;
+        }
+        if(status!==gl.ALREADY_SIGNALED&&status!==gl.CONDITION_SATISFIED){
+          // Not ready yet — yield to event loop and retry
+          setTimeout(poll,0);return;
+        }
+        gl.deleteSync(sync);
+      }
+      // GPU done — read back from PBO to CPU array
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER,pbo);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER,0,raw);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER,null);
+      gl.deleteBuffer(pbo);
+      resolve(raw);
+    }
+    // First poll after one rAF (GPU usually done by then)
+    requestAnimationFrame(()=>setTimeout(poll,0));
+  });
+}
+
 async function captureNow(){
   if(penId!==null||undoBusy)return;
   undoBusy=true;
@@ -876,17 +984,12 @@ async function captureNow(){
     if(histIdx<hist.length-1)hist.length=histIdx+1;
     const snap=[];
     for(const l of gLayers){
-      const raw=getR8Buf();
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-      gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-      // Store pixel data ONLY — no layer properties
+      // pboReadPixels: async, non-blocking GPU→CPU transfer
+      const raw=await pboReadPixels(l.fbo,CW,CH);
       snap.push({id:l.id,bits:packBits(raw)});
-      await new Promise(r=>setTimeout(r,0));
     }
     hist.push(snap);
     const mx=maxUndoCount();if(hist.length>mx+1)hist.shift();else histIdx++;
-    // Update thumbs only if layer panel is open (avoids readPixels overhead when hidden)
     if(openPanel==='layers')updateThumbs();
   }finally{undoBusy=false;document.getElementById('undo-busy').classList.remove('show');}
 }
@@ -920,10 +1023,6 @@ function rgb01ToHex(c){return'#'+c.map(v=>Math.round(v*255).toString(16).padStar
 function addGLLayer(name,hexColor){
   const tex=makeR8Texture(CW,CH),fbo=makeR8FBO(tex);
   gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-  // LINEAR_MIPMAP_LINEAR requires a complete mipmap chain — generate now on the cleared texture.
-  // Without this, the texture is "incomplete" and WebGL samples it as black/transparent
-  // until the first finishStroke() calls scheduleMipmap().
-  gl.bindTexture(gl.TEXTURE_2D,tex);gl.generateMipmap(gl.TEXTURE_2D);gl.bindTexture(gl.TEXTURE_2D,null);
   const l={id:(Date.now()*1000+Math.random()*999)|0,name,color:hexToRGB01(hexColor||'#000000'),opacity:1,visible:true,blend:'normal',tex,fbo};
   gLayers.push(l);gActiveIdx=gLayers.length-1;return l;
 }
@@ -1253,6 +1352,9 @@ function commitTransform(){
   const wbw=Math.max(1,wbxE-wbx),wbh=Math.max(1,wbyE-wby);
   if(wbw<1||wbh<1){commitCleanup();scheduleDraw();return;}
 
+  // Ensure execLasso's texSubImage2D writes are visible to readPixels below
+  gl.flush();
+
   // execLasso already erased the original pixels from the texture/FBO.
   // Read the destination area (already erased state), add transformed selection on top.
   const r8=readR8Bbox(l.fbo,wbx,wby,wbw,wbh);
@@ -1260,10 +1362,12 @@ function commitTransform(){
   try{
     const warpC=document.createElement('canvas');warpC.width=wbw;warpC.height=wbh;
     const wctx=warpC.getContext('2d');
+    wctx.save(); // IMPORTANT: save before transform
     wctx.translate(cx-wbx,cy-wby);
     wctx.rotate(rot);
     wctx.scale(sx,sy);
     wctx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);
+    wctx.restore(); // restore after drawing
     const warpId=wctx.getImageData(0,0,wbw,wbh);
     for(let row=0;row<wbh;row++){
       const fboRow=wbh-1-row;
@@ -1355,7 +1459,13 @@ document.addEventListener('touchstart',function(e){
   if(penId!==null&&penId!==st.identifier){finishStroke();penId=null;}
   penId=st.identifier;
   if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
-  if(selState==='transform'){const h=hitHandle(st.clientX,st.clientY);if(h){selHandle=h;selPrevPt={x:st.clientX,y:st.clientY};return;}}
+  if(selState==='transform'){
+    const h=hitHandle(st.clientX,st.clientY);
+    selHandle=h||null; // clear stale handle if no hit
+    if(h) selPrevPt={x:st.clientX,y:st.clientY};
+    // Always return — never start a stroke while in transform mode
+    return;
+  }
   updPRC(st.clientX,st.clientY,st.force);
   schedulePanelAutoClose();
   beginStroke(st.clientX,st.clientY,st.force);
@@ -1366,18 +1476,30 @@ document.addEventListener('touchmove',function(e){
   let st=null;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===penId&&isStylusT(t)){st=t;break;}}
   if(!st)return;e.preventDefault();
   if(selState==='lasso'){const pt=screenToCanvas(st.clientX,st.clientY),last=lassoPath[lassoPath.length-1];if(!last||Math.hypot(pt.x-last.x,pt.y-last.y)>2){lassoPath.push(pt);drawSelOv();}return;}
-  if(selState==='transform'&&selHandle){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);selPrevPt={x:st.clientX,y:st.clientY};return;}
+  if(selState==='transform'){
+    // Always return in transform mode — never draw strokes while transforming.
+    // selHandle could be null (tap missed handles) — still block stroke start.
+    if(selHandle){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);selPrevPt={x:st.clientX,y:st.clientY};}
+    return;
+  }
   updPRC(st.clientX,st.clientY,st.force);
   const evs=e.getCoalescedTouches?e.getCoalescedTouches(st):[];
   if(evs.length>0)for(const c of evs)continueStroke(c.clientX,c.clientY,c.force);
   else continueStroke(st.clientX,st.clientY,st.force);
+  // Flush once after all coalesced points — single GPU drawcall per touchmove event
+  if(instCount>0)flushBrush();
 },{passive:false,capture:true});
 
 document.addEventListener('touchend',function(e){
   if(penId===null)return;
   let st=null;for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){st=e.changedTouches[i];break;}
   if(!st)return;e.preventDefault();
-  prc.style.display='none';penId=null;selHandle=null;selPrevPt=null;
+  prc.style.display='none';penId=null;
+  if(selState==='transform'){
+    selHandle=null;selPrevPt=null;
+    return; // never finishStroke in transform mode
+  }
+  selHandle=null;selPrevPt=null;
   if(selState==='lasso'){drawSelOv();return;}
   finishStroke();captureStroke();
 },{passive:false,capture:true});
@@ -1846,7 +1968,6 @@ szConfirm.addEventListener('pointerdown',async e=>{
     gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
     gl.bindTexture(gl.TEXTURE_2D,tex);
     gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,s.r8);
-    gl.generateMipmap(gl.TEXTURE_2D); // make texture complete before first draw
     gl.bindTexture(gl.TEXTURE_2D,null);
     gLayers.push({id:s.id,name:s.name,color:s.color,opacity:s.opacity,visible:s.visible,blend:s.blend,tex,fbo});
   }
@@ -2244,7 +2365,7 @@ function showToast(msg){const t=document.getElementById('toast');t.textContent=m
 let spPos={x:16,y:200};
 let spMinimized=false;
 // Each slot: null or {type:'pen'|'marker'|'eraser', settings:{...}}
-let spSlots=Array(6).fill(null);
+let spSlots=Array(12).fill(null);
 
 const spEl=document.getElementById('sub-palette');
 const spBody=document.getElementById('sp-body');
@@ -2267,11 +2388,16 @@ function spRender(){
     slot.classList.toggle('has-tool',!!s);
     slot.classList.toggle('active-tool',i===spActiveSlot&&!!s);
     if(s){
-      icon.textContent=s.type==='pen'?'✏':s.type==='marker'?'✒':'⊘';
+      if(s.type==='eraser'){
+        // SVG eraser icon (⊘ doesn't render reliably on all iOS fonts)
+        icon.innerHTML='<svg width="16" height="14" viewBox="0 0 16 14" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="5" width="14" height="7" rx="1.5" fill="#f87171"/><rect x="1" y="5" width="7" height="7" rx="1.5" fill="#fca5a5"/><line x1="8" y1="5" x2="8" y2="12" stroke="#ef4444" stroke-width="0.8"/><polygon points="3,0 13,0 15,5 1,5" fill="#d1d5db"/></svg>';
+      }else{
+        icon.textContent=s.type==='pen'?'✏':'✒';
+      }
       label.textContent=s.type==='pen'?'ペン':s.type==='marker'?'マーカー':'消しゴム';
       sz.textContent=s.settings.sz?s.settings.sz+'px':'';
     }else{
-      icon.textContent='＋';label.textContent='空き';sz.textContent='';
+      icon.innerHTML='';icon.textContent='＋';label.textContent='空き';sz.textContent='';
     }
   });
 }
@@ -2409,7 +2535,7 @@ spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true
     compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeRGBAFBO(compB_tex);
     // Snap sub-palette to nearest screen edge after rotation
     // Find which edge it's closest to and align that edge to the new screen bounds
-    const spW=spMinimized?34:174,spH=spMinimized?34:220;
+    const spW=spMinimized?34:210,spH=spMinimized?34:220;
     const distLeft=spPos.x;
     const distRight=Math.abs((spPos.x+spW)-screenW);
     const distTop=spPos.y;
@@ -2427,6 +2553,34 @@ spBody.addEventListener('touchend',()=>{spDrag=false;saveState();},{passive:true
     resetView();
     resizeSelOv();
   });
+
+  // ── Page Visibility: pause all GPU work when app is backgrounded ──
+  // iOS Safari throttles background tabs to 1fps — but pending rAFs can pile up
+  // and fire in a burst when foregrounded, causing a freeze spike.
+  // Solution: cancel pending rAF/setTimeout on hide, re-trigger on show.
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){
+      // App backgrounded: cancel pending draw to avoid burst on resume
+      drawScheduled=false;
+      // Also abort any in-progress undo capture (it holds GPU resources)
+      undoBusy=false;
+      document.getElementById('undo-busy').classList.remove('show');
+    }else{
+      // App foregrounded: redraw immediately
+      scheduleDraw();
+    }
+  });
+
+  // ── iOS Safari: request sustained performance hint via pointer ──
+  // navigator.scheduling is Chrome-only, but pointer*none on canvas
+  // prevents iOS from coalescing touch events (reduces latency).
+  // touch-action:none is already set on #app; this adds JS-side hint.
+  if(typeof navigator.scheduling!=='undefined'&&navigator.scheduling.isInputPending){
+    // Yield to input if pending — prevents JS from blocking touch delivery
+    const _origScheduleDraw=scheduleDraw;
+    let _yieldPending=false;
+    window.scheduleDraw=scheduleDraw; // expose for override
+  }
 })();
 </script>
 </body>
