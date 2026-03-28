@@ -713,6 +713,7 @@ function getR8Buf(){
   const n=CW*CH;if(!_r8Buf||_r8BufPx!==n){_r8Buf=new Uint8Array(n);_r8BufPx=n;}return _r8Buf;
 }
 let _bitsBuf=null,_bitsBufPx=0;
+let lastCaptureTime = 0;   // ← 新規追加
 function getBitsBuf(){
   const n=Math.ceil(CW*CH/8);if(!_bitsBuf||_bitsBufPx!==n){_bitsBuf=new Uint8Array(n);_bitsBufPx=n;}
   _bitsBuf.fill(0);return _bitsBuf;
@@ -759,11 +760,18 @@ let captureDebounceTimer=null;
 function captureStroke(){
   if(penId!==null)return;
   clearTimeout(captureDebounceTimer);
-  captureDebounceTimer=setTimeout(captureNow,80);
+  captureDebounceTimer=setTimeout(captureNow,250);
 }
 
 async function captureNow(){
   if(penId!==null||undoBusy)return;
+  const now = Date.now();
+  if(now - lastCaptureTime < 600){
+    undoBusy=false;
+    document.getElementById('undo-busy').classList.remove('show');
+    return;
+  }
+  lastCaptureTime = now;
   if(CW>=9440){
     if(histIdx<hist.length-1)hist.length=histIdx+1;
     hist.push([]);const mx=maxUndoCount();if(hist.length>mx+1)hist.shift();else histIdx++;
@@ -866,7 +874,7 @@ function debouncedUpdateThumbs(){
       for(let row=0;row<TSIZE;row++){const s=(TSIZE-1-row)*TSIZE*4;flipped.set(small.subarray(s,s+TSIZE*4),row*TSIZE*4);}
       ctx.putImageData(new ImageData(new Uint8ClampedArray(flipped.buffer),TSIZE,TSIZE),0,0);
     });
-  },700);
+  },1200);
 }
 function updateThumbs(){debouncedUpdateThumbs();}
 
