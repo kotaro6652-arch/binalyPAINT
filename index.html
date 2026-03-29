@@ -1335,7 +1335,7 @@ function renderLayers(){
 renderLayers._thumbT=null;
 document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
   e.preventDefault();e.stopPropagation();
-  if(gLayers.length>=3){showToast('レイヤーは最大3枚まで（メモリ保護）');return;}
+  if(gLayers.length>=12){showToast('レイヤーは最大12枚まで（メモリ保護）');return;}
   addGLLayer('レイヤー '+(gLayers.length+1),'#000000');
   hist=[];histIdx=-1;
   scheduleDraw();setTimeout(captureNow,0);renderLayers();
