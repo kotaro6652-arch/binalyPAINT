@@ -69,7 +69,7 @@ html,body{width:100%;height:100%;height:-webkit-fill-available;overflow:hidden;b
 #sv-go{width:100%;padding:9px;background:var(--sf2);border:1px solid var(--acc);border-radius:8px;color:var(--acc);font-size:13px;cursor:pointer;touch-action:manipulation}
 #sv-psd{width:100%;padding:9px;margin-top:7px;background:var(--sf2);border:1px solid #7c3aed;border-radius:8px;color:#a78bfa;font-size:13px;cursor:pointer;touch-action:manipulation}
 /* Right tabs */
-#rpanel-group{position:fixed;right:0;z-index:210;display:flex;flex-direction:column;align-items:flex-end;gap:4px;transition:right .25s cubic-bezier(.4,0,.2,1)}
+#rpanel-group{position:fixed;right:0;z-index:210;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
 #rpanel-group.shifted{right:var(--pw)}
 #tab-dot{width:16px;height:16px;border-radius:50%;background:var(--aqua);cursor:grab;touch-action:none;flex-shrink:0;margin-right:9px;align-self:flex-end;margin-bottom:2px}
 #rtabs{display:flex;flex-direction:column;gap:4px}
@@ -80,7 +80,7 @@ html,body{width:100%;height:100%;height:-webkit-fill-available;overflow:hidden;b
 .er-ico{width:22px;height:13px;position:relative;pointer-events:none}
 .er-ico::before{content:'';position:absolute;inset:0;background:linear-gradient(to right,#e8c0c0 62%,#b07070 62%);border-radius:2px;border:1.5px solid #aaaaaa}
 /* Right panels */
-.rpanel{position:fixed;right:calc(-1 * var(--pw));top:50%;transform:translateY(-50%);width:var(--pw);max-height:88vh;background:var(--sf);border:1px solid var(--bd);border-right:none;border-radius:14px 0 0 14px;z-index:205;transition:right .25s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow:hidden}
+.rpanel{position:fixed;right:calc(-1 * var(--pw));top:50%;transform:translateY(-50%);width:var(--pw);max-height:88vh;background:var(--sf);border:1px solid var(--bd);border-right:none;border-radius:14px 0 0 14px;z-index:205;display:flex;flex-direction:column;overflow:hidden}
 .rpanel.open{right:0}
 .ph{padding:12px 14px 9px;font-size:10px;font-weight:500;color:var(--tx2);letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid var(--bd);flex-shrink:0;display:flex;align-items:center;justify-content:space-between;touch-action:manipulation}
 .pb{padding:12px;overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch;touch-action:pan-y}
@@ -99,14 +99,12 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 .togrow .lbl{font-size:12px;color:var(--tx)}
 .tog{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0;touch-action:manipulation}
 .tog input{opacity:0;width:0;height:0}
-.ttr{position:absolute;inset:0;background:var(--bd2);border-radius:20px;transition:background .2s;pointer-events:none}
+.ttr{position:absolute;inset:0;background:var(--bd2);border-radius:20px;pointer-events:none}
 .tog input:checked+.ttr{background:var(--acc)}
-.tth{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;transition:transform .2s;pointer-events:none}
+.tth{position:absolute;top:3px;left:3px;width:14px;height:14px;background:#fff;border-radius:50%;pointer-events:none}
 .tog input:checked~.tth{transform:translateX(16px)}
-/* Pressure curve canvas - interactive */
-.curve-cv{width:100%;height:100px;border-radius:8px;border:1px solid var(--bd);background:var(--sf2);display:block;margin-bottom:6px;touch-action:none;cursor:crosshair}
-.stab-cv{width:100%;height:36px;border-radius:6px;border:1px solid var(--bd);background:var(--sf2);display:block;margin-bottom:4px}
-.curve-hint{font-size:9px;color:var(--tx2);margin-bottom:10px;padding:5px 8px;background:var(--sf2);border-radius:6px;border:1px solid var(--bd);line-height:1.6}
+.curve-cv{width:100%;height:100px;border-radius:4px;border:1px solid var(--bd);background:var(--sf2);display:block;margin-bottom:6px;touch-action:none;cursor:ns-resize}
+.stab-cv{width:100%;height:36px;border-radius:4px;border:1px solid var(--bd);background:var(--sf2);display:block;margin-bottom:4px}
 .mode-sel{display:flex;gap:6px;margin-bottom:12px}
 .mode-btn{flex:1;padding:8px 4px;text-align:center;font-size:11px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx2);cursor:pointer;touch-action:manipulation}
 .mode-btn.sel{border-color:var(--red);color:var(--red)}
@@ -266,8 +264,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-pr" checked><div class="ttr"></div><div class="tth"></div></label></div>
   <div id="pr-sec">
     <canvas class="curve-cv" id="curve-cv" width="244" height="100"></canvas>
-    <div class="curve-hint">点をドラッグしてカーブ調整 | 長押しで点を削除 | 空白タップで点を追加</div>
-    <div class="row"><label>カーブ</label><input type="range" class="native" id="sl-cv" min="10" max="400" value="200"><span class="val" id="v-cv">2.00</span></div>
+    <div style="font-size:9px;color:var(--tx2);margin-bottom:8px">ドラッグで5点を調整</div>
   </div>
 </div></div>
 <div class="rpanel" id="mk-panel"><div class="ph">マーカー設定</div><div class="pb">
@@ -281,8 +278,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-mk-pr"><div class="ttr"></div><div class="tth"></div></label></div>
   <div id="mk-pr-sec" style="opacity:.4">
     <canvas class="curve-cv" id="mk-curve-cv" width="244" height="100"></canvas>
-    <div class="curve-hint">点をドラッグしてカーブ調整 | 長押しで点を削除 | 空白タップで点を追加</div>
-    <div class="row"><label>カーブ</label><input type="range" class="native" id="sl-mk-cv" min="10" max="400" value="200"><span class="val" id="v-mk-cv">2.00</span></div>
+    <div style="font-size:9px;color:var(--tx2);margin-bottom:8px">ドラッグで5点を調整</div>
   </div>
 </div></div>
 <div class="rpanel" id="er-panel"><div class="ph">消しゴム設定</div><div class="pb">
@@ -373,9 +369,11 @@ function _mkC(w,h){
 }
 
 // ── ツール（カーブポイント方式） ──────────────────────────
-// pts: [{x:筆圧0-1, y:サイズ比0-1}] 単調増加、(0,0)と(1,1)は固定端点
-// オリジナルのpower-2カーブ(curve=2.0)に近似したデフォルト
-const DEFAULT_PTS=[{x:0,y:0},{x:0.3,y:0.09},{x:0.6,y:0.36},{x:0.85,y:0.72},{x:1,y:1}];
+// pts: 5点固定 x=[0,0.25,0.5,0.75,1]、yのみ操作可能
+// power-2カーブに近似したデフォルト: y ≈ x^2
+const CURVE_X=[0,0.25,0.5,0.75,1]; // 固定X位置
+const DEFAULT_Y=[0,0.0625,0.25,0.5625,1]; // x^2の値
+const DEFAULT_PTS=CURVE_X.map((x,i)=>({x,y:DEFAULT_Y[i]}));
 const TOOLS={
   pen:  {sz:12,min:1,pressure:true, curve:2.0,stab:1,pts:DEFAULT_PTS.map(p=>({...p}))},
   marker:{sz:12,min:1,pressure:false,curve:2.0,stab:1,pts:DEFAULT_PTS.map(p=>({...p}))}
@@ -395,9 +393,8 @@ function stabAdd(pt){
   const n=stabBuf.length;return{x:stabBuf.reduce((a,p)=>a+p.x,0)/n,y:stabBuf.reduce((a,p)=>a+p.y,0)/n};
 }
 
-// ── 筆圧→サイズ変換（制御点補間） ───────────────────────
+// ── 筆圧→サイズ変換（線形補間） ──────────────────────────
 function evalCurvePts(pts,pressure){
-  // pts: [{x,y}] ソート済み、pは0-1
   const p=Math.max(0,Math.min(1,pressure));
   if(!pts||pts.length===0)return p;
   if(p<=pts[0].x)return pts[0].y;
@@ -405,9 +402,7 @@ function evalCurvePts(pts,pressure){
   for(let i=1;i<pts.length;i++){
     if(p<=pts[i].x){
       const t=(p-pts[i-1].x)/(pts[i].x-pts[i-1].x||1e-9);
-      // cubic ease
-      const tt=t*t*(3-2*t);
-      return pts[i-1].y+tt*(pts[i].y-pts[i-1].y);
+      return pts[i-1].y+t*(pts[i].y-pts[i-1].y);
     }
   }
   return pts[pts.length-1].y;
@@ -1162,15 +1157,15 @@ function renderLayers(){
     });
     item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);list.appendChild(item);
     (function(el2,lay){
-      const mn=0,mx=100,rt=3;let val2=Math.round(lay.opacity*100),pd=false,sx=0,sv=0;
+      const mn=0,mx=100,rt=3;let val2=Math.round(lay.opacity*100),pd=false,sx=0,sv=0,touchId2=-1;
       el2.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
       const f2=el2.querySelector('.csl-fill'),k2=el2.querySelector('.csl-knob');
       function r2(){const p=(val2-mn)/(mx-mn)*100;f2.style.width=p+'%';k2.style.left=p+'%';}
       function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;oval.textContent=val2+'%';scheduleDraw();}
-      // touch events でiOS Safariのpan-y競合を回避
-      el2.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();pd=true;sx=e.changedTouches[0].clientX;sv=val2;},{passive:false});
-      el2.addEventListener('touchmove',function(e){if(!pd)return;e.preventDefault();a2(sv+(e.changedTouches[0].clientX-sx)/rt);},{passive:false});
-      el2.addEventListener('touchend',()=>pd=false,{passive:true});el2.addEventListener('touchcancel',()=>pd=false,{passive:true});r2();
+      el2.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();const t=e.changedTouches[0];touchId2=t.identifier;pd=true;sx=t.clientX;sv=val2;},{passive:false});
+      el2.addEventListener('touchmove',function(e){e.preventDefault();e.stopPropagation();if(!pd)return;const t=[...e.changedTouches].find(c=>c.identifier===touchId2);if(!t)return;a2(sv+(t.clientX-sx)/rt);},{passive:false});
+      el2.addEventListener('touchend',function(){pd=false;touchId2=-1;},{passive:true});
+      el2.addEventListener('touchcancel',function(){pd=false;touchId2=-1;},{passive:true});r2();
     })(ocsl,layer);
   });
   if(openPanel==='layers')debouncedUpdateThumbs();
@@ -1202,10 +1197,10 @@ szConfirm.addEventListener('pointerdown',async e=>{
     dstCtx.imageSmoothingEnabled=false;dstCtx.drawImage(srcC,0,0,w,h);
     const di=dstCtx.getImageData(0,0,w,h);const r8new=new Uint8Array(w*h);
     for(let row=0;row<h;row++){const fr=h-1-row;for(let col=0;col<w;col++)r8new[fr*w+col]=di.data[(row*w+col)*4+3]>127?255:0;}
-    scaledLayers.push({...l,r8new});await new Promise(r=>setTimeout(r,0));
+    scaledLayers.push({ref:l,r8new});await new Promise(r=>setTimeout(r,0));
   }
   CW=w;CH=h;hist=[];histIdx=-1;
-  for(const sl of scaledLayers){const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,sl.r8new);gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(sl.tex);gl.deleteFramebuffer(sl.fbo);sl.tex=nt;sl.fbo=nf;delete sl.r8new;}
+  for(const{ref,r8new}of scaledLayers){const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(ref.tex);gl.deleteFramebuffer(ref.fbo);ref.tex=nt;ref.fbo=nf;}
   resetView();setTimeout(captureNow,0);renderLayers();
   document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');showToast(`${CW}×${CH} に変換完了`);
 });
@@ -1531,101 +1526,54 @@ cpModal.addEventListener('pointerdown',e=>{if(e.target===cpModal){_cpCallback=nu
 function initCurveEditor(canvasId,getToolFn,setToolFn){
   const cv=document.getElementById(canvasId);if(!cv)return;
   const W=cv.width,H=cv.height;
-  const HIT_R=14; // タッチ判定半径px（ペン・指共通）
-  let activePt=-1,lastTapPt=-1,lastTapTime=0;
-  function getPts(){return(getToolFn().pts||DEFAULT_PTS).map(p=>({...p}));}
-  function setPts(pts){const t=getToolFn();t.pts=pts.slice().sort((a,b)=>a.x-b.x);setToolFn(t);}
-  // Y: 画面上方=大きいサイズ(y=1)、画面下方=小さいサイズ(y=0)
-  function ptToScreen(pt){return{x:pt.x*W,y:(1-pt.y)*H};}
-  function screenToPt(sx,sy){return{x:Math.max(0,Math.min(1,sx/W)),y:Math.max(0,Math.min(1,1-sy/H))};}
-  function hitTest(sx,sy){const pts=getPts();for(let i=0;i<pts.length;i++){const s=ptToScreen(pts[i]);if(Math.hypot(sx-s.x,sy-s.y)<HIT_R)return i;}return-1;}
+  // 5点固定: xは CURVE_X に固定、yのみドラッグで変更
+  let activePt=-1;
+  function getY(){const t=getToolFn();return t.pts?t.pts.map(p=>p.y):DEFAULT_Y.slice();}
+  function setY(ys){const t=getToolFn();t.pts=CURVE_X.map((x,i)=>({x,y:Math.max(0,Math.min(1,ys[i]))}));setToolFn(t);}
+  function ptSX(i){return CURVE_X[i]*W;}
+  function ptSY(ys,i){return(1-ys[i])*H;}
+  function hitTest(sx,sy,ys){for(let i=0;i<5;i++){const dx=sx-ptSX(i),dy=sy-ptSY(ys,i);if(dx*dx+dy*dy<18*18)return i;}return-1;}
   function draw(){
     const ctx=cv.getContext('2d');ctx.clearRect(0,0,W,H);
     ctx.fillStyle='#1e1e26';ctx.fillRect(0,0,W,H);
     ctx.strokeStyle='#2a2a3a';ctx.lineWidth=1;
     for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(W*i/4,0);ctx.lineTo(W*i/4,H);ctx.stroke();ctx.beginPath();ctx.moveTo(0,H*i/4);ctx.lineTo(W,H*i/4);ctx.stroke();}
-    const pts=getPts();const tool=getToolFn();
-    // 最小サイズライン（緑）
+    const tool=getToolFn();const ys=getY();
     if(tool.min>0&&tool.sz>0){const yF=(1-tool.min/tool.sz)*H;ctx.strokeStyle='#4ade80';ctx.setLineDash([2,4]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,yF);ctx.lineTo(W,yF);ctx.stroke();ctx.setLineDash([]);}
-    // カーブ本体
-    ctx.strokeStyle=tool.pressure?'#5b9cf6':'#888888';ctx.lineWidth=2;ctx.beginPath();
-    for(let px=0;px<=W;px++){
-      // evalCurvePts → 0=小サイズ, 1=大サイズ → 画面Y: 大=上(小Y), 小=下(大Y)
-      const ratio=evalCurvePts(pts,px/W);
-      const y=(1-ratio)*H; // ratio=1→y=0(上), ratio=0→y=H(下) ✓
-      px?ctx.lineTo(px,y):ctx.moveTo(px,y);
-    }ctx.stroke();
-    // 制御点
-    pts.forEach((pt,idx)=>{
-      const s=ptToScreen(pt);
-      ctx.beginPath();ctx.arc(s.x,s.y,idx===activePt?8:6,0,Math.PI*2);
-      ctx.fillStyle=idx===activePt?'#f97316':'#5b9cf6';ctx.fill();
-      ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
-    });
-    ctx.fillStyle='#7a7a8a';ctx.font='9px "DM Mono",monospace';
-    ctx.fillText('筆圧 →',3,H-3);ctx.fillText('↑ px',2,9);
+    ctx.strokeStyle=tool.pressure?'#5b9cf6':'#666677';ctx.lineWidth=2;ctx.beginPath();
+    for(let i=0;i<5;i++){const sx=ptSX(i),sy=ptSY(ys,i);i?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy);}ctx.stroke();
+    for(let i=0;i<5;i++){const sx=ptSX(i),sy=ptSY(ys,i);ctx.beginPath();ctx.arc(sx,sy,i===activePt?9:6,0,Math.PI*2);ctx.fillStyle=i===activePt?'#f97316':'#5b9cf6';ctx.fill();ctx.strokeStyle='#ffffff';ctx.lineWidth=1.5;ctx.stroke();}
+    ctx.fillStyle='#7a7a8a';ctx.font='9px "DM Mono",monospace';ctx.fillText('筆圧 →',3,H-3);ctx.fillText('↑ px',2,9);
   }
-  function getCvPt(clientX,clientY){const rect=cv.getBoundingClientRect();return{x:(clientX-rect.left)*W/rect.width,y:(clientY-rect.top)*H/rect.height};}
-
-  // ── ポインターイベント（ペン・マウス共通） ────────────
+  function getCvY(clientY){const rect=cv.getBoundingClientRect();return(clientY-rect.top)*H/rect.height;}
+  function getCvXY(clientX,clientY){const rect=cv.getBoundingClientRect();return{x:(clientX-rect.left)*W/rect.width,y:(clientY-rect.top)*H/rect.height};}
+  function applyDrag(clientY){
+    if(activePt<0)return;const ys=getY();
+    ys[activePt]=Math.max(0,Math.min(1,1-getCvY(clientY)/H));
+    setY(ys);draw();
+  }
+  // ── ポインター（ペン・マウス） ─────────────────────────
   cv.addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();cv.setPointerCapture(e.pointerId);
-    const{x,y}=getCvPt(e.clientX,e.clientY);const hit=hitTest(x,y);const now=Date.now();
-    if(hit>=0){
-      // ダブルタップで削除（端点以外）
-      if(hit===lastTapPt&&now-lastTapTime<400&&hit>0&&hit<getPts().length-1){
-        const pts=getPts();if(pts.length>2){pts.splice(hit,1);setPts(pts);activePt=-1;lastTapPt=-1;draw();return;}
-      }
-      activePt=hit;lastTapPt=hit;lastTapTime=now;
-    }else{
-      // 空白タップで新規追加
-      const pt=screenToPt(x,y);const pts=getPts();
-      pts.push({x:+pt.x.toFixed(3),y:+pt.y.toFixed(3)});
-      setPts(pts);
-      const sorted=getPts();activePt=sorted.findIndex(p=>Math.abs(p.x-pt.x)<0.015&&Math.abs(p.y-pt.y)<0.015);
-      lastTapPt=-1;draw();
-    }
+    const{x,y}=getCvXY(e.clientX,e.clientY);activePt=hitTest(x,y,getY());draw();
   },{passive:false});
-  cv.addEventListener('pointermove',e=>{
-    if(activePt<0)return;e.preventDefault();
-    const{x,y}=getCvPt(e.clientX,e.clientY);const pts=getPts();const pt=screenToPt(x,y);
-    if(activePt===0)pts[activePt]={x:0,y:+pt.y.toFixed(3)};
-    else if(activePt===pts.length-1)pts[activePt]={x:1,y:+pt.y.toFixed(3)};
-    else pts[activePt]={x:+pt.x.toFixed(3),y:+pt.y.toFixed(3)};
-    setPts(pts);draw();
-  },{passive:false});
-  cv.addEventListener('pointerup',e=>{activePt=-1;},{passive:false});
-  cv.addEventListener('pointercancel',e=>{activePt=-1;},{passive:false});
-
-  // ── タッチイベント（指専用フォールバック） ─────────────
-  let touchActivePt=-1,touchLastPt=-1,touchLastTime=0;
+  cv.addEventListener('pointermove',e=>{if(activePt<0)return;e.preventDefault();applyDrag(e.clientY);},{passive:false});
+  cv.addEventListener('pointerup',()=>{activePt=-1;draw();},{passive:false});
+  cv.addEventListener('pointercancel',()=>{activePt=-1;},{passive:false});
+  // ── タッチ（指） ────────────────────────────────────────
+  let touchId=-1;
   cv.addEventListener('touchstart',e=>{
-    if(e.pointerType==='pen')return; // ペンはpointerで処理
     e.preventDefault();e.stopPropagation();
-    const t=e.changedTouches[0];const{x,y}=getCvPt(t.clientX,t.clientY);
-    const hit=hitTest(x,y);const now=Date.now();
-    if(hit>=0){
-      if(hit===touchLastPt&&now-touchLastTime<400&&hit>0&&hit<getPts().length-1){
-        const pts=getPts();if(pts.length>2){pts.splice(hit,1);setPts(pts);touchActivePt=-1;touchLastPt=-1;draw();return;}
-      }
-      touchActivePt=hit;touchLastPt=hit;touchLastTime=now;activePt=hit;
-    }else{
-      const pt=screenToPt(x,y);const pts=getPts();pts.push({x:+pt.x.toFixed(3),y:+pt.y.toFixed(3)});
-      setPts(pts);const sorted=getPts();touchActivePt=sorted.findIndex(p=>Math.abs(p.x-pt.x)<0.015&&Math.abs(p.y-pt.y)<0.015);activePt=touchActivePt;touchLastPt=-1;draw();
-    }
+    const t=e.changedTouches[0];touchId=t.identifier;
+    const{x,y}=getCvXY(t.clientX,t.clientY);activePt=hitTest(x,y,getY());draw();
   },{passive:false});
   cv.addEventListener('touchmove',e=>{
-    if(touchActivePt<0)return;e.preventDefault();
-    const t=e.changedTouches[0];const{x,y}=getCvPt(t.clientX,t.clientY);
-    const pts=getPts();const pt=screenToPt(x,y);
-    if(touchActivePt===0)pts[touchActivePt]={x:0,y:+pt.y.toFixed(3)};
-    else if(touchActivePt===pts.length-1)pts[touchActivePt]={x:1,y:+pt.y.toFixed(3)};
-    else pts[touchActivePt]={x:+pt.x.toFixed(3),y:+pt.y.toFixed(3)};
-    setPts(pts);activePt=touchActivePt;draw();
+    e.preventDefault();e.stopPropagation();
+    if(activePt<0)return;
+    const t=[...e.changedTouches].find(c=>c.identifier===touchId);if(!t)return;applyDrag(t.clientY);
   },{passive:false});
-  cv.addEventListener('touchend',e=>{touchActivePt=-1;activePt=-1;},{passive:false});
-  cv.addEventListener('touchcancel',e=>{touchActivePt=-1;activePt=-1;},{passive:false});
-
+  cv.addEventListener('touchend',e=>{touchId=-1;activePt=-1;draw();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{touchId=-1;activePt=-1;},{passive:false});
   draw();return draw;
 }
 
@@ -1698,13 +1646,12 @@ async function rotateCanvas90CW(){
   for(const l of gLayers){
     const r8=new Uint8Array(CW*CH);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-    // 90°CW回転: new(r,c) = old(newW-1-c, r) ただしR8はbottom-up
-    // GL座標(x,y)→r8[y*CW+x], y=0はbottom
-    // 90°CW: new_gl(nx,ny) = old_gl(ny, newH-1-nx) where newW=CH,newH=CW
+    // 90°CW回転 (GL座標 y=0=bottom)
+    // 検証済み公式: r8new[ny*newW+nx] = r8[nx*CW+(CW-1-ny)]
+    // where newW=CH(old height), newH=CW(old width)
     const r8new=new Uint8Array(newW*newH);
     for(let ny=0;ny<newH;ny++){for(let nx=0;nx<newW;nx++){
-      const oldX=ny,oldY=newH-1-nx;
-      r8new[ny*newW+nx]=r8[oldY*CW+oldX];
+      r8new[ny*newW+nx]=r8[nx*CW+(CW-1-ny)];
     }}
     rotatedLayers.push({l,r8new});
     await new Promise(r=>setTimeout(r,0));
@@ -1732,40 +1679,33 @@ document.getElementById('rotate-canvas-btn').addEventListener('pointerdown',e=>{
   scheduleDraw();setTimeout(captureNow,0);spRender();
 
   // ── ペン設定スライダー
-  initCsl('csl-sz',TOOLS.pen.sz,v=>{TOOLS.pen.sz=v;if(activeTool==='pen')bSize=v;document.getElementById('v-sz').textContent=v+'px';drawPen();});
-  initCsl('csl-msz',TOOLS.pen.min,v=>{TOOLS.pen.min=v;if(activeTool==='pen')bMin=v;document.getElementById('v-msz').textContent=v+'px';drawPen();});
-  initCsl('csl-stab',TOOLS.pen.stab,v=>{TOOLS.pen.stab=v;if(activeTool==='pen')stabLen=v;document.getElementById('v-stab').textContent=v;drawStabOn('stab-cv',v);});
-  initCsl('csl-esz',eSize,v=>{eSize=v;document.getElementById('v-esz').textContent=v+'px';});
-  const slCv=document.getElementById('sl-cv');
-  slCv.value=Math.round(TOOLS.pen.curve*100);updRF(slCv);
-  slCv.addEventListener('input',function(){TOOLS.pen.curve=this.value/100;if(activeTool==='pen')bCurve=TOOLS.pen.curve;document.getElementById('v-cv').textContent=TOOLS.pen.curve.toFixed(2);updRF(this);drawPen();});
-  document.getElementById('cb-pr').checked=TOOLS.pen.pressure;
-  document.getElementById('cb-pr').addEventListener('change',e=>{TOOLS.pen.pressure=e.target.checked;if(activeTool==='pen')bPressure=e.target.checked;document.getElementById('pr-sec').style.opacity=e.target.checked?'1':'0.4';drawPen();});
-  document.getElementById('pr-sec').style.opacity=TOOLS.pen.pressure?'1':'0.4';
-
-  // カーブエディタ初期化（#6）
+  // カーブエディタを先に定義してからスライダー初期化
   const drawPenCurve=initCurveEditor('curve-cv',
     ()=>({pts:TOOLS.pen.pts,min:TOOLS.pen.min,sz:TOOLS.pen.sz,pressure:TOOLS.pen.pressure}),
     (t)=>{TOOLS.pen.pts=t.pts;if(activeTool==='pen')bPts=TOOLS.pen.pts;}
   );
   function drawPen(){if(drawPenCurve)drawPenCurve();}
 
-  // ── マーカー設定スライダー
-  initCsl('csl-mk-sz',TOOLS.marker.sz,v=>{TOOLS.marker.sz=v;if(activeTool==='marker')bSize=v;document.getElementById('v-mk-sz').textContent=v+'px';drawMk();});
-  initCsl('csl-mk-msz',TOOLS.marker.min,v=>{TOOLS.marker.min=v;if(activeTool==='marker')bMin=v;document.getElementById('v-mk-msz').textContent=v+'px';drawMk();});
-  initCsl('csl-mk-stab',TOOLS.marker.stab,v=>{TOOLS.marker.stab=v;if(activeTool==='marker')stabLen=v;document.getElementById('v-mk-stab').textContent=v;drawStabOn('mk-stab-cv',v);});
-  const slMkCv=document.getElementById('sl-mk-cv');
-  slMkCv.value=Math.round(TOOLS.marker.curve*100);updRF(slMkCv);
-  slMkCv.addEventListener('input',function(){TOOLS.marker.curve=this.value/100;if(activeTool==='marker')bCurve=TOOLS.marker.curve;document.getElementById('v-mk-cv').textContent=TOOLS.marker.curve.toFixed(2);updRF(this);drawMk();});
-  document.getElementById('cb-mk-pr').checked=TOOLS.marker.pressure;
-  document.getElementById('cb-mk-pr').addEventListener('change',e=>{TOOLS.marker.pressure=e.target.checked;if(activeTool==='marker')bPressure=e.target.checked;document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';drawMk();});
-  document.getElementById('mk-pr-sec').style.opacity=TOOLS.marker.pressure?'1':'0.4';
+  initCsl('csl-sz',TOOLS.pen.sz,v=>{TOOLS.pen.sz=v;if(activeTool==='pen')bSize=v;document.getElementById('v-sz').textContent=v+'px';drawPen();});
+  initCsl('csl-msz',TOOLS.pen.min,v=>{TOOLS.pen.min=v;if(activeTool==='pen')bMin=v;document.getElementById('v-msz').textContent=v+'px';drawPen();});
+  initCsl('csl-stab',TOOLS.pen.stab,v=>{TOOLS.pen.stab=v;if(activeTool==='pen')stabLen=v;document.getElementById('v-stab').textContent=v;drawStabOn('stab-cv',v);});
+  initCsl('csl-esz',eSize,v=>{eSize=v;document.getElementById('v-esz').textContent=v+'px';});
+  document.getElementById('cb-pr').checked=TOOLS.pen.pressure;
+  document.getElementById('cb-pr').addEventListener('change',e=>{TOOLS.pen.pressure=e.target.checked;if(activeTool==='pen')bPressure=e.target.checked;document.getElementById('pr-sec').style.opacity=e.target.checked?'1':'0.4';drawPen();});
+  document.getElementById('pr-sec').style.opacity=TOOLS.pen.pressure?'1':'0.4';
 
+  // ── マーカー設定スライダー
   const drawMkCurve=initCurveEditor('mk-curve-cv',
     ()=>({pts:TOOLS.marker.pts,min:TOOLS.marker.min,sz:TOOLS.marker.sz,pressure:TOOLS.marker.pressure}),
     (t)=>{TOOLS.marker.pts=t.pts;if(activeTool==='marker')bPts=TOOLS.marker.pts;}
   );
   function drawMk(){if(drawMkCurve)drawMkCurve();}
+  initCsl('csl-mk-sz',TOOLS.marker.sz,v=>{TOOLS.marker.sz=v;if(activeTool==='marker')bSize=v;document.getElementById('v-mk-sz').textContent=v+'px';drawMk();});
+  initCsl('csl-mk-msz',TOOLS.marker.min,v=>{TOOLS.marker.min=v;if(activeTool==='marker')bMin=v;document.getElementById('v-mk-msz').textContent=v+'px';drawMk();});
+  initCsl('csl-mk-stab',TOOLS.marker.stab,v=>{TOOLS.marker.stab=v;if(activeTool==='marker')stabLen=v;document.getElementById('v-mk-stab').textContent=v;drawStabOn('mk-stab-cv',v);});
+  document.getElementById('cb-mk-pr').checked=TOOLS.marker.pressure;
+  document.getElementById('cb-mk-pr').addEventListener('change',e=>{TOOLS.marker.pressure=e.target.checked;if(activeTool==='marker')bPressure=e.target.checked;document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';drawMk();});
+  document.getElementById('mk-pr-sec').style.opacity=TOOLS.marker.pressure?'1':'0.4';
 
   // 消しゴムモードUI
   document.querySelectorAll('.mode-btn').forEach(b=>{b.classList.toggle('sel',b.dataset.mode===erbMode);});
