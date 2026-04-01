@@ -18,7 +18,7 @@
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 html,body{width:100%;height:100%;height:-webkit-fill-available;overflow:hidden;background:var(--bg);font-family:'Noto Sans JP',sans-serif}
 #app{position:relative;width:100vw;width:-webkit-fill-available;height:100vh;height:-webkit-fill-available;overflow:hidden;touch-action:none}
-#gl-canvas{position:fixed;top:0;left:0;z-index:1;pointer-events:none;image-rendering:pixelated}
+#gl-canvas{position:fixed;top:0;left:0;z-index:1;pointer-events:none;image-rendering:pixelated;will-change:transform;transform:translateZ(0)}
 #ca{position:absolute;inset:0;overflow:hidden;touch-action:none;z-index:0}
 #cw{position:absolute;transform-origin:0 0}
 #paper{position:absolute;width:0;height:0;overflow:visible}
@@ -35,7 +35,7 @@ html,body{width:100%;height:100%;height:-webkit-fill-available;overflow:hidden;b
 #open-btn{right:calc(10px + 80px + 6px + 76px + 6px)}
 #new-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px)}
 #reset-view-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
-#rotate-canvas-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px + 60px + 6px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
+/* rotate-canvas-btn repositioned below */
 /* New dialog */
 #new-dialog{position:fixed;inset:0;z-index:500;background:#000000cc;display:none;align-items:center;justify-content:center}
 #new-dialog.show{display:flex}
@@ -183,7 +183,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 #sub-palette.minimized #sp-body{border-radius:50%;width:28px;height:28px;padding:0;display:flex;align-items:center;justify-content:center}
 #sub-palette.minimized #sp-header{display:none}
 /* Color Picker Modal */
-#cpicker-modal{position:fixed;inset:0;z-index:600;background:#000000aa;display:none;align-items:center;justify-content:center;touch-action:none}
+#cpicker-modal{position:fixed;inset:0;z-index:600;background:#000000dd;display:none;align-items:center;justify-content:center;touch-action:none}
 #cpicker-modal.show{display:flex}
 #cpicker-box{background:var(--sf);border:1px solid var(--bd);border-radius:16px;padding:16px;display:flex;flex-direction:column;align-items:center;gap:10px;min-width:300px}
 #cpicker-tabs{display:flex;gap:6px;width:100%}
@@ -203,6 +203,29 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 #cpicker-hex:focus{border-color:var(--acc)}
 #cpicker-ok{padding:8px 20px;background:var(--sf2);border:1px solid var(--acc);border-radius:8px;color:var(--acc);font-size:13px;cursor:pointer;touch-action:manipulation}
 #cpicker-cancel{padding:8px 16px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:13px;cursor:pointer;touch-action:manipulation}
+
+/* Fill button */
+#fill-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px + 60px + 6px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
+#fill-btn.on{border-color:var(--aqua);color:var(--aqua);background:#0f2a2a}
+/* rotate moves right */
+#rotate-canvas-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px + 60px + 6px + 60px + 6px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
+/* ref-btn / persp-btn on right side */
+#ref-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px)}
+#ref-btn.on{border-color:var(--acc);color:var(--acc)}
+#persp-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px + 60px + 6px)}
+#persp-btn.on{border-color:#a78bfa;color:#a78bfa}
+/* ref-panel */
+#ref-panel{left:10px;min-width:240px}
+/* persp-panel */
+#persp-panel{left:10px;min-width:260px}
+.vp-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:6px 8px;background:var(--sf2);border-radius:6px;border-left:3px solid #888}
+.vp-row.vp-x{border-left-color:#f87171}
+.vp-row.vp-y{border-left-color:#4ade80}
+.vp-row.vp-z{border-left-color:#60a5fa}
+.vp-lbl{font-size:10px;color:var(--tx);font-family:'DM Mono',monospace;flex:1}
+.vp-coord{font-size:9px;color:var(--tx2);font-family:'DM Mono',monospace}
+.ref-preview{width:100%;height:60px;background:#1a1a24;border-radius:6px;border:1px solid var(--bd);margin-bottom:8px;object-fit:contain;display:none}
+.ref-preview.show{display:block}
 </style>
 </head>
 <body>
@@ -212,7 +235,38 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 <div class="topbtn" id="sz-btn">📐 <span id="sz-cur">2360×1640</span></div>
 <div id="bg-wrap"><div id="bg-swatch"></div><span id="bg-label">背景色</span></div>
 <div id="reset-view-btn">⊙ 実寸</div>
+<div id="fill-btn">🪣 塗り</div>
 <div id="rotate-canvas-btn">↻ 90°</div>
+<div class="topbtn" id="ref-btn">📎 下絵</div>
+<div class="topbtn" id="persp-btn">📐 透視</div>
+<input type="file" id="ref-file-input" accept="image/*" style="display:none">
+<div class="toppanel" id="ref-panel">
+  <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:8px">📎 下絵設定</div>
+  <canvas id="ref-preview-cv" class="ref-preview" width="220" height="60"></canvas>
+  <label id="ref-load-btn" for="ref-file-input" style="width:100%;padding:8px;background:var(--sf2);border:1px solid var(--acc);border-radius:8px;color:var(--acc);font-size:12px;cursor:pointer;touch-action:manipulation;margin-bottom:6px;display:block;text-align:center;box-sizing:border-box">📂 画像を選択</label>
+  <div class="row"><label>不透明度</label><div class="csl" id="csl-ref-op" data-min="0" data-max="100" data-ratio="3"></div><span class="val" id="v-ref-op">50%</span></div>
+  <div style="display:flex;gap:6px;margin-top:6px">
+    <button id="ref-transform-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:11px;cursor:pointer;touch-action:manipulation">↔ 変形</button>
+    <button id="ref-delete-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:11px;cursor:pointer;touch-action:manipulation">🗑 削除</button>
+  </div>
+</div>
+<div class="toppanel" id="persp-panel">
+  <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:6px">📐 3点透視法</div>
+  <canvas id="vp-minimap" width="520" height="320" style="width:100%;border:1px solid var(--bd);border-radius:6px;background:#0d0d14;display:block;margin-bottom:6px;touch-action:none;cursor:crosshair"></canvas>
+  <div class="vp-row vp-x"><span class="vp-lbl">VP1 X軸</span><span class="vp-coord" id="vp1-coord">---</span><span class="vp-coord" id="vp1-ang" style="margin-left:4px;color:#f87171"></span></div>
+  <div class="vp-row vp-y"><span class="vp-lbl">VP2 Y軸</span><span class="vp-coord" id="vp2-coord">---</span><span class="vp-coord" id="vp2-ang" style="margin-left:4px;color:#4ade80"></span></div>
+  <div class="vp-row vp-z"><span class="vp-lbl">VP3 Z軸</span><span class="vp-coord" id="vp3-coord">---</span><span class="vp-coord" id="vp3-ang" style="margin-left:4px;color:#60a5fa"></span></div>
+  <div style="display:flex;gap:4px;margin-top:6px;margin-bottom:6px">
+    <button id="vp-snap-h" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">⬌ 水平</button>
+    <button id="vp-snap-v" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">⬍ 垂直</button>
+    <button id="vp-snap-eq" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">↔ 均等</button>
+  </div>
+  <div class="row"><label>線の数</label><div class="csl" id="csl-persp-n" data-min="4" data-max="64" data-ratio="4"></div><span class="val" id="v-persp-n">12</span></div>
+  <div style="display:flex;gap:6px;margin-top:8px">
+    <button id="persp-reset-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:11px;cursor:pointer;touch-action:manipulation">↺ リセット</button>
+    <button id="persp-gen-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--acc);border-radius:8px;color:var(--acc);font-size:11px;cursor:pointer;touch-action:manipulation">📎 下絵に変換</button>
+  </div>
+</div>
 <div class="topbtn" id="export-btn">📤 書き出し</div>
 <div class="topbtn" id="bpf-save-btn">💾 保存</div>
 <label class="topbtn" id="open-btn" for="file-input">📂 開く</label>
@@ -231,8 +285,8 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="sz-opt" data-w="4720" data-h="3280"><div class="sz-opt-row">2x 高解像度 <small>4720×3280</small></div></div>
   <div class="sz-opt" data-w="9440" data-h="6560"><div class="sz-opt-row">4x 超高解像度 <small>9440×6560</small></div><div class="sz-warn">⚠ 高負荷注意</div></div>
   <button id="sz-confirm">🔄 タップで確定（描画を拡大縮小して変換）</button>
-  <button id="sz-reset" style="width:100%;margin-top:6px;padding:8px;background:var(--sf2);border:1px solid var(--ora);border-radius:8px;color:var(--ora);font-size:11px;cursor:pointer;touch-action:manipulation">🔧 ブラシ・パレット設定をリセット</button>
   <div id="sz-ver">BinaryPaint v20.0+GL<br>WebGL2 R8レイヤー + ビューポート合成<br>iPad / Apple Pencil 対応<br>© 2025 Claude / Anthropic</div>
+  <button id="sz-reset" style="width:100%;margin-top:6px;padding:8px;background:var(--sf2);border:1px solid var(--ora);border-radius:8px;color:var(--ora);font-size:11px;cursor:pointer;touch-action:manipulation">🔧 ブラシ・パレット設定をリセット</button>
 </div>
 <div class="toppanel" id="sv-panel">
   <div class="sv-fn-row"><label>ファイル名</label><input class="sv-fn-input" id="sv-fn" placeholder="ファイル名"><span style="font-size:11px;color:var(--tx2)">.png</span></div>
@@ -365,10 +419,23 @@ let flipState=false;
 let bgColor='#ffffff';
 let bgRGB=[1,1,1];
 let screenW=window.innerWidth,screenH=window.innerHeight;
+// devicePixelRatio: canvas物理ピクセルをRetinaに対応（最大2）
+const DPR=Math.min(window.devicePixelRatio||1,2);
+let glW=Math.round(screenW*DPR),glH=Math.round(screenH*DPR);
 let penId=null,lastDrawPt=null;
 let eraserOn=false,erbMode='toggle';
 let ftouches=new Map(),maxFC=0,fMoved=false,gStart=0,panBase=null,pinchBase=null;
 let openPanel=null,pendingSize=null;
+// ── 下絵・透視・塗りつぶし 状態 ─────────────────────────
+let subMode=null; // null | 'ref' | 'persp' | 'fill'
+// 下絵
+let refImgEl=null,refTex=null,refOpacity=0.5;
+let refTransform={cx:0,cy:0,scale:1,rot:0};
+// 透視
+let perspVPs=null; // 初期化はinitで（CW/CH依存）
+let perspLineCount=12;
+// 塗りつぶし
+let fillMode=false;
 let inkTransparent=false;
 // rulerMode: 0=OFF, 1=直線, 2=スナップ直線(H/V/45°)
 let rulerMode=0,rulerStart=null;
@@ -509,8 +576,6 @@ void main(){
   float cx=(css_x-u_vxy.x)/u_vscale;float cy=(css_y-u_vxy.y)/u_vscale;
   float tu=cx/u_canvas.x;float tv=1.0-cy/u_canvas.y;
   if(tu<0.0||tu>1.0||tv<0.0||tv>1.0){o=vec4(0.067,0.067,0.075,1);return;}
-  float bpx=2.0/u_vscale;
-  if(cx<bpx||cx>u_canvas.x-bpx||cy<bpx||cy>u_canvas.y-bpx){o=vec4(0.45,0.45,0.45,1);return;}
   vec3 base=u_first?u_bg:texture(u_base,v_uv).rgb;
   float ink=texture(u_layer,vec2(tu,tv)).r*u_opacity;
   vec3 rgb;
@@ -522,6 +587,36 @@ void main(){
 const BLIT_FS=`#version 300 es
 precision highp float;in vec2 v_uv;uniform sampler2D u_tex;out vec4 o;
 void main(){o=texture(u_tex,v_uv);}`;
+
+// 下絵（参照画像）レンダーシェーダー
+const REF_FS=`#version 300 es
+precision highp float;
+in vec2 v_uv;out vec4 o;
+uniform sampler2D u_ref;
+uniform float u_opacity;
+uniform vec2 u_screen,u_canvas,u_vxy;
+uniform float u_vscale,u_vrot;
+uniform bool u_flip;
+uniform vec2 u_ref_ctr,u_ref_sz;
+uniform float u_ref_scale,u_ref_rot;
+void main(){
+  float css_x=v_uv.x*u_screen.x;float css_y=(1.0-v_uv.y)*u_screen.y;
+  float ccx=u_vxy.x+u_canvas.x*0.5*u_vscale;float ccy=u_vxy.y+u_canvas.y*0.5*u_vscale;
+  if(u_flip)css_x=u_screen.x-css_x;
+  float dx=css_x-ccx,dy=css_y-ccy;
+  float cosR=cos(-u_vrot),sinR=sin(-u_vrot);
+  css_x=dx*cosR-dy*sinR+ccx;css_y=dx*sinR+dy*cosR+ccy;
+  float cx=(css_x-u_vxy.x)/u_vscale;float cy=(css_y-u_vxy.y)/u_vscale;
+  vec2 loc=vec2(cx,cy)-u_ref_ctr;
+  float rc=cos(-u_ref_rot),rs=sin(-u_ref_rot);
+  vec2 rot=vec2(rc*loc.x-rs*loc.y,rs*loc.x+rc*loc.y)/u_ref_scale;
+  vec2 uv=(rot+u_ref_sz*.5)/u_ref_sz;
+  // UNPACK_FLIP_Y=false なので Y軸をフリップ（Canvas2D Y=0=top → GL Y=0=bottom）
+  uv.y=1.0-uv.y;
+  if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0)discard;
+  vec4 col=texture(u_ref,uv);
+  o=vec4(col.rgb,col.a*u_opacity);
+}`;
 
 const PROG={};
 function compileShader(type,src){const s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
@@ -558,7 +653,8 @@ function makeFBO(tex){const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAME
 function initWebGL(){
   const canvas=document.getElementById('gl-canvas');
   screenW=window.innerWidth;screenH=window.innerHeight;
-  canvas.width=screenW;canvas.height=screenH;
+  glW=Math.round(screenW*DPR);glH=Math.round(screenH*DPR);
+  canvas.width=glW;canvas.height=glH;
   canvas.style.width=screenW+'px';canvas.style.height=screenH+'px';
   gl=canvas.getContext('webgl2',{alpha:false,antialias:false,premultipliedAlpha:false,preserveDrawingBuffer:true});
   if(!gl){showToast('WebGL2 非対応');return false;}
@@ -566,6 +662,7 @@ function initWebGL(){
   PROG.brush=makeProgram(BRUSH_VS,BRUSH_FS);
   PROG.comp=makeProgram(QUAD_VS,COMP_FS);
   PROG.blit=makeProgram(QUAD_VS,BLIT_FS);
+  PROG.ref=makeProgram(QUAD_VS,REF_FS);
   initCompUniforms();
   brushVAO=gl.createVertexArray();gl.bindVertexArray(brushVAO);
   const qv=new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]);
@@ -576,8 +673,8 @@ function initWebGL(){
   quadVAO=gl.createVertexArray();gl.bindVertexArray(quadVAO);
   const qb2=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,qb2);gl.bufferData(gl.ARRAY_BUFFER,qv,gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);gl.bindVertexArray(null);
-  compA_tex=makeRGBATexture(screenW,screenH);compA_fbo=makeFBO(compA_tex);
-  compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeFBO(compB_tex);
+  compA_tex=makeRGBATexture(glW,glH);compA_fbo=makeFBO(compA_tex);
+  compB_tex=makeRGBATexture(glW,glH);compB_fbo=makeFBO(compB_tex);
   canvas.addEventListener('webglcontextlost',function(e){e.preventDefault();drawScheduled=false;undoBusy=false;document.getElementById('undo-busy').classList.remove('show');cancelSel();showToast('⚠ GPU メモリ不足 — 再読み込みしてください');},false);
   canvas.addEventListener('webglcontextrestored',function(){showToast('GPU 復帰 — 再読み込みを推奨します');},false);
   return true;
@@ -599,7 +696,17 @@ function queueDot(x,y,d){if(instCount>=MAX_INST)flushBrush();instArr[instCount*3
 function queueLine(x0,y0,x1,y1,d){const dx=x1-x0,dy=y1-y0,dist=Math.sqrt(dx*dx+dy*dy);if(dist===0)return;const step=Math.max(0.4,d/3);const n=Math.ceil(dist/step);for(let i=1;i<=n;i++){const t=i/n;queueDot(x0+dx*t,y0+dy*t,d);}}
 
 let drawScheduled=false;
-function scheduleDraw(){if(!drawScheduled){drawScheduled=true;requestAnimationFrame(compositeAndDisplay);}}
+function scheduleDraw(){
+  if(!drawScheduled){
+    drawScheduled=true;
+    // パネルが開いていてペンも動いていない場合は低優先度で描画
+    if(openPanel&&penId===null){
+      setTimeout(()=>{if(drawScheduled)requestAnimationFrame(compositeAndDisplay);},32);
+    }else{
+      requestAnimationFrame(compositeAndDisplay);
+    }
+  }
+}
 
 let _compU=null;
 function initCompUniforms(){
@@ -621,12 +728,40 @@ function compositeAndDisplay(){
   drawScheduled=false;if(!gl)return;
   gl.disable(gl.BLEND);
   const visible=gLayers.filter(l=>l.visible);
-  if(visible.length===0){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,screenW,screenH);gl.clearColor(bgRGB[0],bgRGB[1],bgRGB[2],1);gl.clear(gl.COLOR_BUFFER_BIT);return;}
   let srcTex=compA_tex,srcFBO=compA_fbo,dstTex=compB_tex,dstFBO=compB_fbo,first=true;
+
+  // 下絵レンダー（最下層）
+  if(refTex&&refImgEl){
+    gl.bindFramebuffer(gl.FRAMEBUFFER,dstFBO);gl.viewport(0,0,glW,glH);
+    gl.clearColor(bgRGB[0],bgRGB[1],bgRGB[2],1);gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(PROG.ref);
+    gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,refTex);gl.uniform1i(ul(PROG.ref,'u_ref'),0);
+    gl.uniform1f(ul(PROG.ref,'u_opacity'),refOpacity);
+    gl.uniform2f(ul(PROG.ref,'u_screen'),screenW,screenH);gl.uniform2f(ul(PROG.ref,'u_canvas'),CW,CH);
+    gl.uniform2f(ul(PROG.ref,'u_vxy'),view.x,view.y);gl.uniform1f(ul(PROG.ref,'u_vscale'),view.scale);
+    gl.uniform1i(ul(PROG.ref,'u_flip'),flipState?1:0);gl.uniform1f(ul(PROG.ref,'u_vrot'),view.rot);
+    gl.uniform2f(ul(PROG.ref,'u_ref_ctr'),refTransform.cx,refTransform.cy);
+    gl.uniform2f(ul(PROG.ref,'u_ref_sz'),refImgEl.width,refImgEl.height);
+    gl.uniform1f(ul(PROG.ref,'u_ref_scale'),refTransform.scale);gl.uniform1f(ul(PROG.ref,'u_ref_rot'),refTransform.rot);
+    gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+    [srcTex,dstTex]=[dstTex,srcTex];[srcFBO,dstFBO]=[dstFBO,srcFBO];first=false;
+  }
+
+  if(visible.length===0){
+    if(!refTex){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);gl.clearColor(bgRGB[0],bgRGB[1],bgRGB[2],1);gl.clear(gl.COLOR_BUFFER_BIT);return;}
+    // 下絵のみ: srcTexをスクリーンにBlitするためコピー
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);
+    gl.useProgram(PROG.blit);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,srcTex);gl.uniform1i(ul(PROG.blit,'u_tex'),0);
+    gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,null);return;
+  }
+
   for(let i=0;i<visible.length;i++){
     const l=visible[i];const isLast=i===visible.length-1;
-    if(isLast){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,screenW,screenH);}
-    else{gl.bindFramebuffer(gl.FRAMEBUFFER,dstFBO);gl.viewport(0,0,screenW,screenH);}
+    if(isLast){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);}
+    else{gl.bindFramebuffer(gl.FRAMEBUFFER,dstFBO);gl.viewport(0,0,glW,glH);}
     setCompUniforms(PROG.comp,l.tex,l.color,l.opacity,l.blend,first?null:srcTex,first);
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
     if(!isLast){[srcTex,dstTex]=[dstTex,srcTex];[srcFBO,dstFBO]=[dstFBO,srcFBO];first=false;}
@@ -843,13 +978,37 @@ function setSelHint(m){if(m){selHintEl.textContent=m;selHintEl.classList.add('sh
 function initMesh(){meshPts=[];for(let r=0;r<=4;r++){meshPts.push([]);for(let c=0;c<=4;c++)meshPts[r].push({dx:0,dy:0});}}
 function meshPtW(r,c){if(!selBBox||!selTx||!meshPts)return{x:0,y:0};const{cx,cy,rot,sx,sy}=selTx,lx=(c/4-.5)*selBBox.w*sx,ly=(r/4-.5)*selBBox.h*sy;const cos=Math.cos(rot),sin=Math.sin(rot);return{x:cos*lx-sin*ly+cx+meshPts[r][c].dx,y:sin*lx+cos*ly+cy+meshPts[r][c].dy};}
 function meshPtS(r,c){const p=meshPtW(r,c);return canvasToScreen(p.x,p.y);}
-function getHandles(){if(!selTx||!selBBox)return{};const{cx,cy,rot,sx,sy}=selTx,hw=selBBox.w*sx/2,hh=selBBox.h*sy/2,cos=Math.cos(rot),sin=Math.sin(rot);const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);return{TL:rp(-hw,-hh),TC:rp(0,-hh),TR:rp(hw,-hh),ML:rp(-hw,0),MR:rp(hw,0),BL:rp(-hw,hh),BC:rp(0,hh),BR:rp(hw,hh),ROT:rp(0,-hh-44/view.scale)};}
+function getHandles(){
+  if(!selTx||!selBBox)return{};
+  const{cx,cy,rot,sx,sy}=selTx,hw=selBBox.w*sx/2,hh=selBBox.h*sy/2;
+  const cos=Math.cos(rot),sin=Math.sin(rot);
+  const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  // 拡大縮小・回転ハンドルはグリッド点と競合しないよう外側に配置
+  // グリッドは選択範囲内に存在するため、ハンドルはbboxより大きく外側に配置
+  const PAD=28/view.scale; // 外側オフセット（スクリーン28px相当）
+  const hw2=hw+PAD,hh2=hh+PAD;
+  const rpo=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  return{
+    // スケールハンドル（外側拡大版）
+    TL:rpo(-hw2,-hh2),TC:rpo(0,-hh2),TR:rpo(hw2,-hh2),
+    ML:rpo(-hw2,0),MR:rpo(hw2,0),
+    BL:rpo(-hw2,hh2),BC:rpo(0,hh2),BR:rpo(hw2,hh2),
+    // 回転ハンドルはさらに外側
+    ROT:rpo(0,-hh2-44/view.scale)
+  };
+}
 function hitHandle(sx,sy){
-  if(selState!=='transform')return null;const H=getHandles(),R=24;
+  if(selState!=='transform')return null;
+  const H=getHandles(),R=24;
+  // 1. まずスケール・回転ハンドルを判定（最優先）
   for(const[n,p]of Object.entries(H)){const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'h:'+n;}
-  if(meshPts)for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){const sp=meshPtS(r,c),dx=sx-sp.x,dy=sy-sp.y;if(dx*dx+dy*dy<R*R)return`m:${r}:${c}`;}
-  if(selTx&&selBBox){const p=screenToCanvas(sx,sy),{cx,cy,rot,sx:ssx,sy:ssy}=selTx;const cos=Math.cos(-rot),sin=Math.sin(-rot),lx=cos*(p.x-cx)-sin*(p.y-cy),ly=sin*(p.x-cx)+cos*(p.y-cy);if(Math.abs(lx)<selBBox.w*ssx/2&&Math.abs(ly)<selBBox.h*ssy/2)return'h:MOVE';}
-  return null;
+  // 2. メッシュグリッド点
+  if(meshPts)for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
+    const sp=meshPtS(r,c),dx=sx-sp.x,dy=sy-sp.y;if(dx*dx+dy*dy<R*R)return`m:${r}:${c}`;
+  }
+  // 3. bbox内はグリッド操作のみ（MOVE判定しない）
+  // bbox外のどこでもMOVE（画面全体で移動可能）
+  return'h:MOVE';
 }
 function applyHandle(h,psx,psy,csx,csy){
   const pC=screenToCanvas(psx,psy),cC=screenToCanvas(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
@@ -963,10 +1122,11 @@ function drawSelOv(){
   sovCtx.clearRect(0,0,selOv.width,selOv.height);
   if(selState==='lasso'&&lassoPath.length>1){sovCtx.save();sovCtx.strokeStyle='#5b9cf6';sovCtx.lineWidth=2;sovCtx.setLineDash([5,4]);sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();}
   if(rulerMode>0&&rulerStart&&penId!==null){
-    // 定規プレビュー（sovCtxに描画）
     const s=canvasToScreen(rulerStart.x,rulerStart.y);
     if(rulerPreviewPt){sovCtx.save();sovCtx.strokeStyle='#38d9d9';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);sovCtx.beginPath();sovCtx.moveTo(s.x,s.y);sovCtx.lineTo(rulerPreviewPt.x,rulerPreviewPt.y);sovCtx.stroke();sovCtx.restore();}
   }
+  drawRefHandles(sovCtx);
+  drawPerspOverlay(sovCtx);
   if(selState==='transform'&&selImg&&selBBox&&selTx){
     if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
     drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
@@ -981,20 +1141,57 @@ let rulerPreviewPt=null;
 function isStylusT(t){return t.touchType==='stylus';}
 function getStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return list[i];return null;}
 const TAB_MAP={'tab-br':'brush','tab-mk':'marker','tab-er':'eraser','tab-ly':'layers','tab-dot':null};
-function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette,#sel-btn,#flip-btn,#color-btn,#erb,#ruler-btn,#bg-wrap,#sz-btn,#export-btn,#bpf-save-btn,#open-btn'))return'ui';return'canvas';}
+function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette,#sel-btn,#flip-btn,#color-btn,#erb,#ruler-btn,#bg-wrap,#sz-btn,#export-btn,#bpf-save-btn,#open-btn,#fill-btn,#ref-btn,#persp-btn'))return'ui';if(el.closest('#vp-minimap'))return'vp-minimap';return'canvas';}
 document.addEventListener('touchstart',function(e){
   const st=getStylusT(e.changedTouches);if(!st)return;
+  // カラーピッカー表示中はペン処理をスキップ
+  if(cpModal.classList.contains('show'))return;
   const hitEl=document.elementFromPoint(st.clientX,st.clientY);
   if(hitEl){const tab=hitEl.closest('.rtab');if(tab&&TAB_MAP[tab.id]){e.preventDefault();openPanelFn(TAB_MAP[tab.id]);return;}}
   const tgt=classifyPenTarget(st.clientX,st.clientY);
   if(tgt==='panel')return;if(tgt==='ui'){closePanel();return;}
+  // ミニマップ: ペンでVPを直接ドラッグ
+  if(tgt==='vp-minimap'){
+    e.preventDefault();
+    const cv=document.getElementById('vp-minimap');if(!cv)return;
+    const r=cv.getBoundingClientRect();
+    const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
+    const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
+    const mx=(st.clientX-r.left)*cv.width/rw,my=(st.clientY-r.top)*cv.height/rh;
+    _mmDragVP=hitMMVP(mx,my,cv.width,cv.height);
+    if(_mmDragVP<0)_mmDragVP=0; // ヒットしなければVP1をデフォルト選択
+    penId=st.identifier;
+    return;
+  }
   e.preventDefault();
   if(openPanel)closePanel();
   document.getElementById('sz-panel').classList.remove('open');document.getElementById('sv-panel').classList.remove('open');
   if(penId!==null&&penId!==st.identifier){finishStroke();penId=null;}
   penId=st.identifier;
   if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
-  if(selState==='transform'){const h=hitHandle(st.clientX,st.clientY);selHandle=h||null;if(h)selPrevPt={x:st.clientX,y:st.clientY};return;}
+  if(selState==='transform'){
+    const h=hitHandle(st.clientX,st.clientY);
+    selHandle=h||null;
+    selPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // 下絵変形モード
+  if(subMode==='ref'&&refImgEl){
+    _refHandle=hitRefHandle(st.clientX,st.clientY);
+    _refPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // 透視モード: ペンでVP移動
+  if(subMode==='persp'){
+    _perspDragVP=hitPerspVP(st.clientX,st.clientY);
+    if(_perspDragVP>=0)return;
+  }
+  // 塗りつぶしモード
+  if(subMode==='fill'){
+    const cp=screenToCanvas(st.clientX,st.clientY);
+    floodFill(cp.x,cp.y);
+    penId=null;return;
+  }
   // 定規モード
   if(rulerMode>0){rulerStart=screenToCanvas(st.clientX,st.clientY);rulerPreviewPt={x:st.clientX,y:st.clientY};drawSelOv();return;}
   updPRC(st.clientX,st.clientY,st.force);schedulePanelAutoClose();beginStroke(st.clientX,st.clientY,st.force);
@@ -1004,7 +1201,36 @@ document.addEventListener('touchmove',function(e){
   let st=null;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===penId&&isStylusT(t)){st=t;break;}}
   if(!st)return;e.preventDefault();
   if(selState==='lasso'){const pt=screenToCanvas(st.clientX,st.clientY),last=lassoPath[lassoPath.length-1];if(!last||Math.hypot(pt.x-last.x,pt.y-last.y)>2){lassoPath.push(pt);drawSelOv();}return;}
-  if(selState==='transform'){if(selHandle){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);selPrevPt={x:st.clientX,y:st.clientY};}return;}
+  if(selState==='transform'){
+    if(selHandle&&selPrevPt){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);}
+    selPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // ミニマップVPドラッグ（ペン）
+  if(_mmDragVP>=0){
+    const cv=document.getElementById('vp-minimap');if(cv){
+      const r=cv.getBoundingClientRect();
+      const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
+      const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
+      const mx=(st.clientX-r.left)*cv.width/rw,my=(st.clientY-r.top)*cv.height/rh;
+      const cp=mmToCanvas(mx,my,cv.width,cv.height);
+      perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
+      updatePerspCoords();drawSelOv();return;
+    }
+  }
+  // 下絵変形
+  if(subMode==='ref'&&_refHandle&&_refPrevPt){
+    applyRefHandle(_refHandle,_refPrevPt.x,_refPrevPt.y,st.clientX,st.clientY);
+    _refPrevPt={x:st.clientX,y:st.clientY};drawSelOv();return;
+  }
+  // 透視VP移動
+  if(subMode==='persp'&&_perspDragVP>=0){
+    const cp=screenToCanvas(st.clientX,st.clientY);
+    perspVPs[_perspDragVP]={x:cp.x,y:cp.y};
+    updatePerspCoords();drawSelOv();return;
+  }
+  // 塗りつぶしモード: touchmoveは無視
+  if(subMode==='fill')return;
   // 定規モード（プレビュー更新）
   if(rulerMode>0&&rulerStart){
     let ex=st.clientX,ey=st.clientY;
@@ -1048,6 +1274,10 @@ document.addEventListener('touchend',function(e){
     rulerStart=null;rulerPreviewPt=null;drawSelOv();captureStroke();return;
   }
   if(selState==='transform'){selHandle=null;selPrevPt=null;return;}
+  if(_mmDragVP>=0){_mmDragVP=-1;return;}
+  if(subMode==='ref'){_refHandle=null;_refPrevPt=null;return;}
+  if(subMode==='persp'){_perspDragVP=-1;return;}
+  if(subMode==='fill'){penId=null;return;}
   selHandle=null;selPrevPt=null;if(selState==='lasso'){drawSelOv();return;}
   finishStroke();captureStroke();
 },{passive:false,capture:true});
@@ -1561,7 +1791,8 @@ function buildPSD(layersData){
   if(liBodyLen&1)w8(0);w32(0);w16(0);wb(mR);wb(mG);wb(mB);
   if(p!==totalSize)throw new Error(`PSD size error: ${p} vs ${totalSize}`);return out;
 }
-// ── カラーホイールピッカー（#11） ─────────────────────────
+// ── カラーホイールピッカー ────────────────────────────────
+// 外リング=Hue、内側正方形=Saturation(x)×Value(y) 正しいHSV実装
 let _cpCallback=null,_cpHue=0,_cpSat=0,_cpVal=1;
 const cpModal=document.getElementById('cpicker-modal');
 const cpWheel=document.getElementById('cpicker-wheel');
@@ -1574,11 +1805,18 @@ function rgbToHsv(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let
 function hexToRgb01(hex){return[parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255];}
 function rgb01ToHex2(r,g,b){return'#'+(Math.round(r*255).toString(16).padStart(2,'0'))+(Math.round(g*255).toString(16).padStart(2,'0'))+(Math.round(b*255).toString(16).padStart(2,'0'));}
 
+// ホイール描画
 function cpDrawWheel(){
   const W=cpWheel.width,H=cpWheel.height,ctx=cpWheel.getContext('2d');
   ctx.clearRect(0,0,W,H);
-  const cx=W/2,cy=H/2,R=Math.min(W,H)/2-4,rIn=R*0.62;
-  // 外リング（Hue）
+  const cx=W/2,cy=H/2;
+  // リング寸法: 外半径R、内半径rIn（隙間を広めに）
+  const R=Math.min(W,H)/2-3;
+  const RING_W=R*0.22; // リング幅
+  const rIn=R-RING_W;
+  const rInner=rIn-6; // 内側正方形の外接円半径（隙間6px）
+
+  // 外リング: Hue（360分割）
   for(let a=0;a<360;a++){
     const rad=a*Math.PI/180,rad2=(a+2)*Math.PI/180;
     const[r,g,b]=hsvToRgb(a,1,1);
@@ -1586,51 +1824,60 @@ function cpDrawWheel(){
     ctx.arc(cx,cy,R,rad,rad2);ctx.arc(cx,cy,rIn,rad2,rad,true);
     ctx.closePath();ctx.fillStyle=`rgb(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)})`;ctx.fill();
   }
-  // 内側ディスク（S+V）
+
+  // 内側正方形: S(x軸 左=0右=1) × V(y軸 上=1下=0)
+  // 正方形は内接円より少し小さく
+  const sq=rInner*Math.SQRT2*0.88; // 内接正方形の辺長
+  const sqX=cx-sq/2,sqY=cy-sq/2;
+  // S方向グラデ（白→純色）
   const[hr,hg,hb]=hsvToRgb(_cpHue,1,1);
-  const grad1=ctx.createRadialGradient(cx,cy,0,cx,cy,rIn-2);
-  grad1.addColorStop(0,'#ffffff');grad1.addColorStop(1,`rgb(${Math.round(hr*255)},${Math.round(hg*255)},${Math.round(hb*255)})`);
-  ctx.beginPath();ctx.arc(cx,cy,rIn-2,0,Math.PI*2);ctx.fillStyle=grad1;ctx.fill();
-  const grad2=ctx.createRadialGradient(cx,cy,0,cx,cy,rIn-2);
-  grad2.addColorStop(0,'rgba(0,0,0,0)');grad2.addColorStop(1,'rgba(0,0,0,1)');
-  ctx.beginPath();ctx.arc(cx,cy,rIn-2,0,Math.PI*2);ctx.fillStyle=grad2;ctx.fill();
+  const gradH=ctx.createLinearGradient(sqX,0,sqX+sq,0);
+  gradH.addColorStop(0,'#ffffff');gradH.addColorStop(1,`rgb(${Math.round(hr*255)},${Math.round(hg*255)},${Math.round(hb*255)})`);
+  ctx.fillStyle=gradH;ctx.fillRect(sqX,sqY,sq,sq);
+  // V方向グラデ（下=黒、上=透明）→ 正しい: 上=明るい、下=黒
+  const gradV=ctx.createLinearGradient(0,sqY,0,sqY+sq);
+  gradV.addColorStop(0,'rgba(0,0,0,0)');gradV.addColorStop(1,'rgba(0,0,0,1)');
+  ctx.fillStyle=gradV;ctx.fillRect(sqX,sqY,sq,sq);
+
   // Hueハンドル（リング上）
-  const hr2=_cpHue*Math.PI/180;const rMid=(R+rIn)/2;
-  const hx=cx+Math.cos(hr2)*rMid,hy=cy+Math.sin(hr2)*rMid;
-  ctx.beginPath();ctx.arc(hx,hy,9,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2.5;ctx.stroke();ctx.beginPath();ctx.arc(hx,hy,9,0,Math.PI*2);ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke();
-  // SVハンドル（ディスク上）
-  const dist=(1-_cpVal)*(rIn-2);const angle=(_cpSat===0?Math.PI/2:Math.atan2(dist*(1-_cpSat*2),dist*_cpSat));
-  // S=saturation方向、V=明度（半径）で内側ディスクをマップ
-  // 簡易マッピング: S→角度(hue方向), V→半径(外=明るい、内=暗い)
-  const sv_r=_cpVal*_cpSat*(rIn-2);const sv_a=_cpHue*Math.PI/180;
-  const sx2=cx+sv_r*Math.cos(sv_a),sy2=cy+sv_r*Math.sin(sv_a);
-  // 実際の表示位置: V=1-radius/rIn, S=0..1 radial
-  const diskR=_cpVal*(rIn-4);const diskX=cx+Math.cos(sv_a)*diskR*0,diskY=cy;
-  // SV ディスクでは: 内側=黒(V=0), 外側=色(V=1,S=1) or 白(V=1,S=0)
-  // 位置計算: x軸=S(0..1)、y軸=V(1..0) で2Dグリッドに
-  const dvx=cx+(_cpSat-0.5)*(rIn-6)*2*0.7,dvy=cy+(1-_cpVal)*(rIn-6)*0.7;
-  // 選択点をクリップ
-  const dr=Math.sqrt((dvx-cx)**2+(dvy-cy)**2);const dscale=dr>rIn-4?(rIn-4)/dr:1;
-  const dx2=cx+(dvx-cx)*dscale,dy2=cy+(dvy-cy)*dscale;
-  ctx.beginPath();ctx.arc(dx2,dy2,8,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2.5;ctx.stroke();ctx.beginPath();ctx.arc(dx2,dy2,8,0,Math.PI*2);ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke();
+  const hAngle=_cpHue*Math.PI/180;
+  const rMid=rIn+RING_W/2;
+  const hx=cx+Math.cos(hAngle)*rMid,hy=cy+Math.sin(hAngle)*rMid;
+  ctx.beginPath();ctx.arc(hx,hy,8,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(hx,hy,8,0,Math.PI*2);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.stroke();
+
+  // SVハンドル（正方形内）
+  const sx=sqX+_cpSat*sq,sy=sqY+(1-_cpVal)*sq;
+  ctx.beginPath();ctx.arc(sx,sy,7,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(sx,sy,7,0,Math.PI*2);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.stroke();
+
+  // _sq をグローバルで保持（ピック時に使用）
+  cpWheel._sq={sqX,sqY,sq,R,rIn,cx,cy};
 }
+
 function cpUpdatePreview(){
   const[r,g,b]=hsvToRgb(_cpHue,_cpSat,_cpVal);
   const hex=rgb01ToHex2(r,g,b);cpPreview.style.background=hex;cpHexIn.value=hex;
 }
+
 function cpPickWheel(ex,ey){
-  const rect=cpWheel.getBoundingClientRect();const cx=cpWheel.width/2,cy=cpWheel.height/2;const R=Math.min(cpWheel.width,cpWheel.height)/2-4,rIn=R*0.62;
-  const px=(ex-rect.left)*cpWheel.width/rect.width-cx,py=(ey-rect.top)*cpWheel.height/rect.height-cy;
-  const dist=Math.sqrt(px*px+py*py);
-  if(dist>=rIn&&dist<=R+4){// リング→Hue
-    _cpHue=((Math.atan2(py,px)*180/Math.PI)+360)%360;
-  }else if(dist<rIn){// ディスク→SV
-    // x→S, y→V（クリップ後）
-    _cpSat=Math.max(0,Math.min(1,px/(rIn-6)/0.7/2+0.5));
-    _cpVal=Math.max(0,Math.min(1,1-py/(rIn-6)/0.7));
+  const rect=cpWheel.getBoundingClientRect();
+  const scaleX=cpWheel.width/rect.width,scaleY=cpWheel.height/rect.height;
+  const px=(ex-rect.left)*scaleX,py=(ey-rect.top)*scaleY;
+  const d=cpWheel._sq;if(!d)return;
+  const{sqX,sqY,sq,R,rIn,cx,cy}=d;
+  const dx=px-cx,dy=py-cy,dist=Math.hypot(dx,dy);
+  if(dist>=rIn&&dist<=R+4){
+    // リング: Hue
+    _cpHue=((Math.atan2(dy,dx)*180/Math.PI)+360)%360;
+  }else{
+    // 正方形内: S,V（クランプ）
+    _cpSat=Math.max(0,Math.min(1,(px-sqX)/sq));
+    _cpVal=Math.max(0,Math.min(1,1-(py-sqY)/sq));
   }
   cpDrawWheel();cpUpdatePreview();
 }
+
 let _cpDragging=false;
 cpWheel.addEventListener('pointerdown',e=>{e.preventDefault();cpWheel.setPointerCapture(e.pointerId);_cpDragging=true;cpPickWheel(e.clientX,e.clientY);},{passive:false});
 cpWheel.addEventListener('pointermove',e=>{if(!_cpDragging)return;e.preventDefault();cpPickWheel(e.clientX,e.clientY);},{passive:false});
@@ -1661,6 +1908,7 @@ function openColorPicker(initHex,callback){
 document.getElementById('cpicker-ok').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();if(_cpCallback){_cpCallback(cpHexIn.value);}_cpCallback=null;cpModal.classList.remove('show');});
 document.getElementById('cpicker-cancel').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();_cpCallback=null;cpModal.classList.remove('show');});
 cpModal.addEventListener('pointerdown',e=>{if(e.target===cpModal){_cpCallback=null;cpModal.classList.remove('show');}});
+
 
 // ── カーブポイントエディタ（#6） ──────────────────────────
 function initCurveEditor(canvasId,getToolFn,setToolFn){
@@ -1838,6 +2086,417 @@ async function rotateCanvas90CW(){
 }
 document.getElementById('rotate-canvas-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();rotateCanvas90CW();});
 
+// ── 下絵（参照画像）機能 ────────────────────────────────
+function loadRefImage(imgEl){
+  refImgEl=imgEl;
+  const defScale=Math.min(CW/imgEl.width,CH/imgEl.height);
+  refTransform={cx:CW/2,cy:CH/2,scale:defScale,rot:0};
+  if(refTex){gl.deleteTexture(refTex);}
+  refTex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,refTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,imgEl);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+  scheduleDraw();
+  // プレビュー更新
+  const cv=document.getElementById('ref-preview-cv');
+  const ctx=cv.getContext('2d');const s=Math.min(220/imgEl.width,60/imgEl.height);
+  ctx.clearRect(0,0,220,60);ctx.drawImage(imgEl,(220-imgEl.width*s)/2,(60-imgEl.height*s)/2,imgEl.width*s,imgEl.height*s);
+  cv.classList.add('show');
+}
+function deleteRefImage(){
+  if(refTex){gl.deleteTexture(refTex);refTex=null;}
+  refImgEl=null;subMode=null;
+  document.getElementById('ref-preview-cv').classList.remove('show');
+  scheduleDraw();
+}
+function getRefHandles(){
+  if(!refImgEl)return{};
+  const hw=refImgEl.width*refTransform.scale/2,hh=refImgEl.height*refTransform.scale/2;
+  const cos=Math.cos(refTransform.rot),sin=Math.sin(refTransform.rot);
+  const cx=refTransform.cx,cy=refTransform.cy;
+  const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  return{TL:rp(-hw,-hh),TR:rp(hw,-hh),BL:rp(-hw,hh),BR:rp(hw,hh),
+         ROT:rp(0,-hh-40/view.scale),CENTER:canvasToScreen(cx,cy)};
+}
+function hitRefHandle(sx,sy){
+  const H=getRefHandles(),R=22;
+  for(const[n,p]of Object.entries(H)){if(!p)continue;const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'r:'+n;}
+  return'r:MOVE';
+}
+let _refHandle=null,_refPrevPt=null;
+function applyRefHandle(h,psx,psy,csx,csy){
+  const pC=screenToCanvas(psx,psy),cC=screenToCanvas(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
+  if(h==='r:CENTER'||h==='r:MOVE'){refTransform.cx+=dx;refTransform.cy+=dy;}
+  else if(h==='r:ROT'){refTransform.rot+=Math.atan2(cC.y-refTransform.cy,cC.x-refTransform.cx)-Math.atan2(pC.y-refTransform.cy,pC.x-refTransform.cx);}
+  else if(/^r:(TL|TR|BL|BR)$/.test(h)){
+    const pd=Math.hypot(pC.x-refTransform.cx,pC.y-refTransform.cy);
+    const cd=Math.hypot(cC.x-refTransform.cx,cC.y-refTransform.cy);
+    if(pd>1)refTransform.scale=Math.max(0.01,refTransform.scale*cd/pd);
+  }
+  scheduleDraw();
+}
+function drawRefHandles(ctx){
+  if(!refImgEl||subMode!=='ref')return;
+  const H=getRefHandles();
+  ctx.save();
+  // 枠線
+  const corners=[H.TL,H.TR,H.BR,H.BL];
+  ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1.5;ctx.setLineDash([5,3]);ctx.beginPath();
+  corners.forEach((p,i)=>p&&(i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)));
+  ctx.closePath();ctx.stroke();ctx.setLineDash([]);
+  // 回転ハンドル
+  if(H.ROT&&H.TL){ctx.beginPath();ctx.moveTo((H.TL.x+H.TR.x)/2,(H.TL.y+H.TR.y)/2);ctx.lineTo(H.ROT.x,H.ROT.y);ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1;ctx.stroke();}
+  // ハンドル点
+  ['TL','TR','BL','BR','ROT','CENTER'].forEach(n=>{
+    const p=H[n];if(!p)return;
+    ctx.beginPath();
+    if(n==='ROT'){ctx.arc(p.x,p.y,8,0,Math.PI*2);}
+    else if(n==='CENTER'){ctx.arc(p.x,p.y,5,0,Math.PI*2);}
+    else{ctx.rect(p.x-6,p.y-6,12,12);}
+    ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1.5;ctx.stroke();
+  });
+  ctx.restore();
+}
+
+// ── 塗りつぶし（BFS） ────────────────────────────────────
+async function floodFill(canvasX,canvasY){
+  const x0=Math.floor(canvasX),y0=Math.floor(canvasY);
+  if(x0<0||x0>=CW||y0<0||y0>=CH)return;
+  const l=gLayers[gActiveIdx];if(!l)return;
+  captureNow();
+  const r8=readR8Full(l);
+  const fillVal=eraserOn?0:255;
+  const glR=CH-1-y0;
+  const tgt=r8[glR*CW+x0];
+  if(tgt===fillVal){showToast('既に同じ色です');return;}
+  showToast('塗りつぶし中…');
+  const visited=new Uint8Array(CW*CH);
+  const stk=[];stk.push(x0,y0);
+  visited[glR*CW+x0]=1;
+  let cnt=0;
+  while(stk.length>0){
+    const py=stk.pop(),px=stk.pop();
+    const gr=CH-1-py;r8[gr*CW+px]=fillVal;cnt++;
+    const nb=[[px-1,py],[px+1,py],[px,py-1],[px,py+1]];
+    for(const[nx,ny]of nb){
+      if(nx<0||nx>=CW||ny<0||ny>=CH)continue;
+      const ni=(CH-1-ny)*CW+nx;
+      if(visited[ni]||r8[ni]!==tgt)continue;
+      visited[ni]=1;stk.push(nx,ny);
+    }
+    if(cnt%80000===0)await new Promise(r=>setTimeout(r,0));
+  }
+  writeR8Full(l,r8);setTimeout(captureNow,0);showToast('塗りつぶし完了');
+}
+
+// ── 3点透視法 ────────────────────────────────────────────
+function initPerspVPs(){
+  perspVPs=[
+    {x:CW*1.8,y:CH*0.5},   // VP1 X軸（赤）右
+    {x:-CW*0.8,y:CH*0.5},  // VP2 Y軸（緑）左
+    {x:CW*0.5,y:-CH*0.8},  // VP3 Z軸（青）上
+  ];
+}
+const VP_COLORS=['#f87171','#4ade80','#60a5fa'];
+const VP_NAMES=['vp1','vp2','vp3'];
+function vpAngle(vi){
+  // vi=0: VP1(X)とVP2(Y)がなす角（消失点間の水平線から）
+  // VP1からキャンバス中心へのベクトルの角度
+  const cx=CW/2,cy=CH/2;
+  const vp=perspVPs[vi];
+  const ang=Math.atan2(vp.y-cy,vp.x-cx)*180/Math.PI;
+  return Math.round(ang)+'°';
+}
+function updatePerspCoords(){
+  perspVPs.forEach((vp,i)=>{
+    const el=document.getElementById(['vp1','vp2','vp3'][i]+'-coord');
+    if(el)el.textContent=`(${Math.round(vp.x)},${Math.round(vp.y)})`;
+    const ea=document.getElementById(['vp1','vp2','vp3'][i]+'-ang');
+    if(ea)ea.textContent=vpAngle(i);
+  });
+  drawVPMinimap();
+}
+
+// ── VP ミニマップ ─────────────────────────────────────────
+// ミニマップはキャンバスと同じアスペクト比
+// 表示範囲: キャンバス中心から±MM_PAD倍
+const MM_PAD=2.5; // キャンバス半幅の何倍まで表示するか
+let _mmDragVP=-1,_mmCanvas=null;
+
+function getMmDims(){
+  const cv=document.getElementById('vp-minimap');if(!cv)return{W:520,H:320};
+  // キャンバスアスペクト比に合わせた実際の描画サイズ
+  const aspect=CW/CH;
+  const W=cv.width; // 固定幅
+  const H=Math.round(W/aspect);
+  return{W,H,aspect};
+}
+function mmToCanvas(mx,my,W,H){
+  // ミニマップ(0,0)-(W,H) → キャンバス座標
+  const rangeX=CW*MM_PAD*2,rangeY=CH*MM_PAD*2;
+  const ox=CW*(1-MM_PAD),oy=CH*(1-MM_PAD);
+  return{x:ox+mx/W*rangeX, y:oy+my/H*rangeY};
+}
+function canvasToMM(cx,cy,W,H){
+  const rangeX=CW*MM_PAD*2,rangeY=CH*MM_PAD*2;
+  const ox=CW*(1-MM_PAD),oy=CH*(1-MM_PAD);
+  return{x:(cx-ox)/rangeX*W, y:(cy-oy)/rangeY*H};
+}
+function drawVPMinimap(){
+  const cv=document.getElementById('vp-minimap');if(!cv)return;
+  _mmCanvas=cv;
+  const W=cv.width,H=cv.height;
+  const ctx=cv.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0d0d14';ctx.fillRect(0,0,W,H);
+  // キャンバス領域をミニマップ内に描画
+  const p0=canvasToMM(0,0,W,H),p1=canvasToMM(CW,CH,W,H);
+  ctx.fillStyle='#1a1a26';ctx.fillRect(p0.x,p0.y,p1.x-p0.x,p1.y-p0.y);
+  ctx.strokeStyle='#3a3a4a';ctx.lineWidth=1.5;ctx.strokeRect(p0.x,p0.y,p1.x-p0.x,p1.y-p0.y);
+  // キャンバス中心十字
+  const pc=canvasToMM(CW/2,CH/2,W,H);
+  ctx.strokeStyle='#2a2a3a';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(p0.x,pc.y);ctx.lineTo(p1.x,pc.y);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(pc.x,p0.y);ctx.lineTo(pc.x,p1.y);ctx.stroke();
+  // VPを結ぶ線（水平線）
+  ctx.setLineDash([3,2]);
+  const vs=perspVPs.map(vp=>canvasToMM(vp.x,vp.y,W,H));
+  ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(vs[0].x,vs[0].y);ctx.lineTo(vs[1].x,vs[1].y);ctx.stroke();
+  ctx.setLineDash([]);
+  // 透視グリッドプレビュー（ミニマップ内）
+  perspVPs.forEach((vp,vi)=>{
+    const sp=canvasToMM(vp.x,vp.y,W,H);
+    const corners=[[0,0],[W,0],[W,H],[0,H]];
+    const angles=corners.map(([cx,cy])=>Math.atan2(cy-sp.y,cx-sp.x));
+    let aMin=Math.min(...angles),aMax=Math.max(...angles);
+    if(aMax-aMin>Math.PI){const adj=angles.map(a=>a<0?a+Math.PI*2:a);aMin=Math.min(...adj);aMax=Math.max(...adj);}
+    ctx.strokeStyle=VP_COLORS[vi]+'44';ctx.lineWidth=0.8;
+    function clipMM(vx,vy,dx,dy){
+      let tn=-1e9,tx=1e9;
+      function cl(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tn=Math.max(tn,t);else tx=Math.min(tx,t);}return true;}
+      if(!cl(-dx,vx))return null;if(!cl(dx,W-vx))return null;
+      if(!cl(-dy,vy))return null;if(!cl(dy,H-vy))return null;
+      if(tn>tx)return null;return{x0:vx+dx*tn,y0:vy+dy*tn,x1:vx+dx*tx,y1:vy+dy*tx};
+    }
+    const NP=Math.min(perspLineCount,20);
+    for(let i=0;i<=NP;i++){
+      const a=aMin+(aMax-aMin)*i/NP;
+      const seg=clipMM(sp.x,sp.y,Math.cos(a),Math.sin(a));
+      if(!seg)continue;
+      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
+    }
+  });
+  // VPハンドル
+  perspVPs.forEach((vp,vi)=>{
+    const sp=canvasToMM(vp.x,vp.y,W,H);
+    // ミニマップ外のVPはエッジにクランプして表示
+    const bx=Math.max(8,Math.min(W-8,sp.x)),by=Math.max(8,Math.min(H-8,sp.y));
+    const isClipped=sp.x<0||sp.x>W||sp.y<0||sp.y>H;
+    ctx.beginPath();ctx.arc(bx,by,isClipped?6:8,0,Math.PI*2);
+    ctx.fillStyle=VP_COLORS[vi];ctx.fill();
+    if(isClipped){ctx.strokeStyle='#fff8';ctx.lineWidth=1.5;ctx.setLineDash([2,2]);ctx.stroke();ctx.setLineDash([]);}
+    else{ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();}
+    ctx.fillStyle='#fff';ctx.font='bold 7px "DM Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(['X','Y','Z'][vi],bx,by);
+  });
+}
+function hitMMVP(mx,my,W,H){
+  for(let i=0;i<3;i++){
+    const sp=canvasToMM(perspVPs[i].x,perspVPs[i].y,W,H);
+    if(Math.hypot(mx-sp.x,my-sp.y)<10)return i;
+  }
+  return-1;
+}
+function initMMEvents(){
+  const cv=document.getElementById('vp-minimap');if(!cv)return;
+  // getBoundingClientRect はdisplay:none時に0を返すのでcv.width/heightを使用
+  function getMMPt(clientX,clientY){
+    const r=cv.getBoundingClientRect();
+    // rectが有効なときはそれを使い、無効（width=0）なら属性値フォールバック
+    const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
+    const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
+    return{x:(clientX-r.left)*cv.width/rw,y:(clientY-r.top)*cv.height/rh};
+  }
+  cv.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();cv.setPointerCapture(e.pointerId);
+    const{x,y}=getMMPt(e.clientX,e.clientY);
+    _mmDragVP=hitMMVP(x,y,cv.width,cv.height);
+  },{passive:false});
+  cv.addEventListener('pointermove',e=>{
+    if(_mmDragVP<0)return;e.preventDefault();
+    const{x,y}=getMMPt(e.clientX,e.clientY);
+    const cp=mmToCanvas(x,y,cv.width,cv.height);
+    perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
+    updatePerspCoords();drawSelOv();
+  },{passive:false});
+  cv.addEventListener('pointerup',()=>_mmDragVP=-1,{passive:false});
+  cv.addEventListener('pointercancel',()=>_mmDragVP=-1,{passive:false});
+  // タッチ対応（ペンは vp-minimap のtouchstartには来ないのでここは指用）
+  let _tid=-1;
+  cv.addEventListener('touchstart',e=>{
+    e.preventDefault();e.stopPropagation();
+    const t=e.changedTouches[0];_tid=t.identifier;
+    const{x,y}=getMMPt(t.clientX,t.clientY);
+    _mmDragVP=hitMMVP(x,y,cv.width,cv.height);
+  },{passive:false});
+  cv.addEventListener('touchmove',e=>{
+    e.preventDefault();e.stopPropagation();if(_mmDragVP<0)return;
+    const t=[...e.changedTouches].find(c=>c.identifier===_tid);if(!t)return;
+    const{x,y}=getMMPt(t.clientX,t.clientY);
+    const cp=mmToCanvas(x,y,cv.width,cv.height);
+    perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
+    updatePerspCoords();drawSelOv();
+  },{passive:false});
+  cv.addEventListener('touchend',()=>{_mmDragVP=-1;},{passive:false});
+  cv.addEventListener('touchcancel',()=>{_mmDragVP=-1;},{passive:false});
+}
+function lineHitsCanvasEdge(vpx,vpy,tx,ty){
+  // Line from VP through target point T, find where it exits [0,CW]×[0,CH]
+  const dx=tx-vpx,dy=ty-vpy,len=Math.hypot(dx,dy);
+  if(len<1)return null;
+  const ux=dx/len,uy=dy/len;
+  const ts=[];
+  if(Math.abs(ux)>1e-9){ts.push((0-vpx)/ux);ts.push((CW-vpx)/ux);}
+  if(Math.abs(uy)>1e-9){ts.push((0-vpy)/uy);ts.push((CH-vpy)/uy);}
+  const valid=ts.filter(t=>{
+    if(t<=0)return false;
+    const hx=vpx+ux*t,hy=vpy+uy*t;
+    return hx>=-2&&hx<=CW+2&&hy>=-2&&hy<=CH+2;
+  });
+  if(!valid.length)return null;
+  const tmin=Math.min(...valid);
+  return{x:vpx+ux*tmin,y:vpy+uy*tmin};
+}
+function renderPerspToCanvas(){
+  const RMAX=2048;
+  const sc=Math.min(1,RMAX/Math.max(CW,CH));
+  const RW=Math.round(CW*sc),RH=Math.round(CH*sc);
+  const c=Object.assign(document.createElement('canvas'),{width:RW,height:RH});
+  const ctx=c.getContext('2d');
+  ctx.clearRect(0,0,RW,RH);
+
+  // 直線をキャンバス内でクリップして両端点を返す（parametric line clipping）
+  function clipLine(vx,vy,dirX,dirY){
+    let tmin=-1e9,tmax=1e9;
+    // Liang-Barsky: p=境界法線・方向, q=点→境界距離
+    function clip(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tmin=Math.max(tmin,t);else tmax=Math.min(tmax,t);}return true;}
+    if(!clip(-dirX, vx))return null;      // x=0 境界: q=vx (修正)
+    if(!clip( dirX, RW-vx))return null;   // x=RW 境界: q=RW-vx
+    if(!clip(-dirY, vy))return null;      // y=0 境界: q=vy (修正)
+    if(!clip( dirY, RH-vy))return null;   // y=RH 境界: q=RH-vy
+    if(tmin>tmax)return null;
+    return{x0:vx+dirX*tmin,y0:vy+dirY*tmin,x1:vx+dirX*tmax,y1:vy+dirY*tmax};
+  }
+
+  perspVPs.forEach((vp,vi)=>{
+    const vpx=vp.x*sc,vpy=vp.y*sc;
+    ctx.strokeStyle=VP_COLORS[vi];ctx.lineWidth=1.5;ctx.globalAlpha=0.7;
+    const N=perspLineCount;
+    // キャンバスの4隅に対する角度範囲を求め、N本均等分布
+    const corners=[[0,0],[RW,0],[RW,RH],[0,RH]];
+    const angles=corners.map(([cx,cy])=>Math.atan2(cy-vpy,cx-vpx));
+    let aMin=Math.min(...angles),aMax=Math.max(...angles);
+    // 角度の連続性対策: 範囲が>πなら折り返しあり
+    if(aMax-aMin>Math.PI){
+      // 折り返しケース: 最小角と最大角を入れ替え
+      const adjusted=angles.map(a=>a<0?a+Math.PI*2:a);
+      aMin=Math.min(...adjusted);aMax=Math.max(...adjusted);
+    }
+    for(let i=0;i<=N;i++){
+      const a=aMin+(aMax-aMin)*i/N;
+      const seg=clipLine(vpx,vpy,Math.cos(a),Math.sin(a));
+      if(!seg)continue;
+      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
+    }
+  });
+
+  // VP1-VP2 水平線（キャンバス内クリップ）
+  const p0x=perspVPs[0].x*sc,p0y=perspVPs[0].y*sc;
+  const p1x=perspVPs[1].x*sc,p1y=perspVPs[1].y*sc;
+  const hdx=p1x-p0x,hdy=p1y-p0y,hlen=Math.hypot(hdx,hdy);
+  if(hlen>1){
+    const seg=clipLine(p0x,p0y,hdx/hlen,hdy/hlen);
+    if(seg){
+      ctx.globalAlpha=0.9;ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
+    }
+  }
+  ctx.globalAlpha=1;
+  return c;
+}
+function renderPerspToRef(){
+  showToast('透視グリッドを生成中…');
+  setTimeout(()=>{
+    try{
+      const c=renderPerspToCanvas();
+      const img=new Image();
+      img.onload=()=>{
+        loadRefImage(img);
+        showToast('透視グリッドを下絵に変換しました');
+      };
+      img.src=c.toDataURL('image/png');
+    }catch(err){showToast('変換エラー: '+err.message);console.error(err);}
+  },50);
+}
+let _perspDragVP=-1;
+function hitPerspVP(sx,sy){
+  for(let i=0;i<3;i++){
+    const sp=canvasToScreen(perspVPs[i].x,perspVPs[i].y);
+    const dx=sx-sp.x,dy=sy-sp.y;
+    if(dx*dx+dy*dy<28*28)return i;
+  }
+  return-1;
+}
+function drawPerspOverlay(ctx){
+  if(subMode!=='persp')return;
+  ctx.save();
+  const W=selOv.width,H=selOv.height;
+  // スクリーン上でキャンバス矩形を求めクリップ
+  function clipLineScreen(vx,vy,dirX,dirY){
+    // selOv全体を範囲としてクリップ（スクリーン外はcanvas2Dが自動クリップ）
+    let tmin=-1e9,tmax=1e9;
+    function clip(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tmin=Math.max(tmin,t);else tmax=Math.min(tmax,t);}return true;}
+    if(!clip(-dirX, vx))return null;if(!clip(dirX,W-vx))return null;
+    if(!clip(-dirY, vy))return null;if(!clip(dirY,H-vy))return null;
+    if(tmin>tmax)return null;
+    return{x0:vx+dirX*tmin,y0:vy+dirY*tmin,x1:vx+dirX*tmax,y1:vy+dirY*tmax};
+  }
+  perspVPs.forEach((vp,vi)=>{
+    const sp=canvasToScreen(vp.x,vp.y);
+    const N=perspLineCount;
+    // キャンバスの4隅スクリーン座標
+    const corners=[[0,0],[CW,0],[CW,CH],[0,CH]].map(([cx,cy])=>canvasToScreen(cx,cy));
+    const angles=corners.map(p=>Math.atan2(p.y-sp.y,p.x-sp.x));
+    let aMin=Math.min(...angles),aMax=Math.max(...angles);
+    if(aMax-aMin>Math.PI){const adj=angles.map(a=>a<0?a+Math.PI*2:a);aMin=Math.min(...adj);aMax=Math.max(...adj);}
+    ctx.strokeStyle=VP_COLORS[vi];ctx.lineWidth=1;ctx.globalAlpha=0.4;
+    for(let i=0;i<=N;i++){
+      const a=aMin+(aMax-aMin)*i/N;
+      const seg=clipLineScreen(sp.x,sp.y,Math.cos(a),Math.sin(a));
+      if(!seg)continue;
+      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
+    }
+    ctx.globalAlpha=1;
+    ctx.beginPath();ctx.arc(sp.x,sp.y,10,0,Math.PI*2);
+    ctx.fillStyle=VP_COLORS[vi];ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='bold 9px "DM Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(['X','Y','Z'][vi],sp.x,sp.y);
+  });
+  // 水平線
+  const s0=canvasToScreen(perspVPs[0].x,perspVPs[0].y);
+  const s1=canvasToScreen(perspVPs[1].x,perspVPs[1].y);
+  ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.setLineDash([8,4]);
+  ctx.beginPath();ctx.moveTo(s0.x,s0.y);ctx.lineTo(s1.x,s1.y);ctx.stroke();ctx.setLineDash([]);
+  ctx.restore();
+}
+
 // ── init ─────────────────────────────────────────────────
 (function init(){
   if(!initWebGL())return;
@@ -1899,6 +2558,98 @@ document.getElementById('rotate-canvas-btn').addEventListener('pointerdown',e=>{
   document.getElementById('sz-cur').textContent=CW+'×'+CH;
   document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
 
+  // 透視VP初期化、ミニマップのアスペクト比調整
+  initPerspVPs();updatePerspCoords();
+  // ミニマップをキャンバスのアスペクト比に合わせる
+  (function(){
+    const cv=document.getElementById('vp-minimap');if(!cv)return;
+    const h=Math.round(cv.width*CH/CW);cv.height=h;cv.style.aspectRatio=CW+'/'+CH;
+  })();
+
+  // 塗りつぶしボタン
+  document.getElementById('fill-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    if(subMode==='fill'){subMode=null;document.getElementById('fill-btn').classList.remove('on');}
+    else{subMode='fill';document.getElementById('fill-btn').classList.add('on');}
+    drawSelOv();
+  });
+
+  // 下絵ボタン
+  const refBtnEl=document.getElementById('ref-btn');
+  const refPanel=document.getElementById('ref-panel');
+  refBtnEl.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    const isOpen=refPanel.classList.contains('open');
+    document.querySelectorAll('.toppanel').forEach(p=>p.classList.remove('open'));
+    if(!isOpen)refPanel.classList.add('open');
+  });
+  document.getElementById('ref-load-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    document.getElementById('ref-file-input').click();
+  });
+  document.getElementById('ref-file-input').addEventListener('change',function(){
+    const file=this.files[0];if(!file)return;this.value='';
+    const reader=new FileReader();
+    reader.onload=ev=>{const img=new Image();img.onload=()=>{loadRefImage(img);};img.src=ev.target.result;};
+    reader.readAsDataURL(file);
+  });
+  initCsl('csl-ref-op',Math.round(refOpacity*100),v=>{refOpacity=v/100;document.getElementById('v-ref-op').textContent=v+'%';scheduleDraw();});
+  document.getElementById('ref-transform-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    if(!refImgEl){showToast('先に画像を読み込んでください');return;}
+    subMode=subMode==='ref'?null:'ref';
+    document.getElementById('ref-transform-btn').textContent=subMode==='ref'?'✓ 変形中':'↔ 変形';
+    drawSelOv();refPanel.classList.remove('open');
+  });
+  document.getElementById('ref-delete-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();deleteRefImage();refPanel.classList.remove('open');showToast('下絵を削除しました');
+  });
+
+  // 透視ボタン
+  const perspBtnEl=document.getElementById('persp-btn');
+  const perspPanel=document.getElementById('persp-panel');
+  perspBtnEl.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    const isOpen=perspPanel.classList.contains('open');
+    document.querySelectorAll('.toppanel').forEach(p=>p.classList.remove('open'));
+    if(!isOpen){perspPanel.classList.add('open');subMode='persp';perspBtnEl.classList.add('on');}
+    else{subMode=null;perspBtnEl.classList.remove('on');}
+    drawSelOv();
+  });
+  initCsl('csl-persp-n',perspLineCount,v=>{perspLineCount=v;document.getElementById('v-persp-n').textContent=v;drawSelOv();});
+  document.getElementById('persp-reset-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();initPerspVPs();updatePerspCoords();drawSelOv();showToast('消失点をリセット');
+  });
+  document.getElementById('persp-gen-btn').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();renderPerspToRef();perspPanel.classList.remove('open');subMode=null;perspBtnEl.classList.remove('on');drawSelOv();
+  });
+  // スナップボタン
+  document.getElementById('vp-snap-h').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    // VP1とVP2を同じY（水平）にスナップ
+    const midY=(perspVPs[0].y+perspVPs[1].y)/2;
+    perspVPs[0].y=midY;perspVPs[1].y=midY;
+    updatePerspCoords();drawSelOv();showToast('VP1・VP2を水平にスナップ');
+  });
+  document.getElementById('vp-snap-v').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    // VP3をキャンバス中心X・VP1-VP2の中間Xに揃える
+    const midX=(perspVPs[0].x+perspVPs[1].x)/2;
+    perspVPs[2].x=midX;
+    updatePerspCoords();drawSelOv();showToast('VP3を垂直中心にスナップ');
+  });
+  document.getElementById('vp-snap-eq').addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();
+    // VP1とVP2をキャンバス中心から等距離にスナップ
+    const cx=CW/2;
+    const d1=Math.abs(perspVPs[0].x-cx),d2=Math.abs(perspVPs[1].x-cx);
+    const dist=(d1+d2)/2;
+    perspVPs[0].x=cx+dist*(perspVPs[0].x>=cx?1:-1);
+    perspVPs[1].x=cx+dist*(perspVPs[1].x>=cx?1:-1);
+    updatePerspCoords();drawSelOv();showToast('VP1・VP2を均等配置にスナップ');
+  });
+  initMMEvents();
+
   // ブラシ・パレットリセット
   document.getElementById('sz-reset').addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();
@@ -1919,9 +2670,12 @@ document.getElementById('rotate-canvas-btn').addEventListener('pointerdown',e=>{
   window.addEventListener('resize',()=>{
     clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
       screenW=window.innerWidth;screenH=window.innerHeight;
-      const canvas=document.getElementById('gl-canvas');canvas.width=screenW;canvas.height=screenH;canvas.style.width=screenW+'px';canvas.style.height=screenH+'px';
+      glW=Math.round(screenW*DPR);glH=Math.round(screenH*DPR);
+      const canvas=document.getElementById('gl-canvas');
+      canvas.width=glW;canvas.height=glH;
+      canvas.style.width=screenW+'px';canvas.style.height=screenH+'px';
       gl.deleteTexture(compA_tex);gl.deleteFramebuffer(compA_fbo);gl.deleteTexture(compB_tex);gl.deleteFramebuffer(compB_fbo);
-      compA_tex=makeRGBATexture(screenW,screenH);compA_fbo=makeFBO(compA_tex);compB_tex=makeRGBATexture(screenW,screenH);compB_fbo=makeFBO(compB_tex);
+      compA_tex=makeRGBATexture(glW,glH);compA_fbo=makeFBO(compA_tex);compB_tex=makeRGBATexture(glW,glH);compB_fbo=makeFBO(compB_tex);
       resizeSelOv();spRender();scheduleDraw();
     },200);
   });
