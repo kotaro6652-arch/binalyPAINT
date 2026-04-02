@@ -26,16 +26,18 @@ html,body{width:100%;height:100%;height:-webkit-fill-available;overflow:hidden;b
 #paper{position:absolute;width:0;height:0;overflow:visible}
 #sel-ov{position:fixed;top:0;left:0;pointer-events:none;z-index:150}
 /* Top bar */
-.topbtn{position:fixed;top:10px;z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:5px;touch-action:manipulation;white-space:nowrap}
+.topbtn{position:fixed;top:10px;z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--tx2);cursor:pointer;min-width:42px;text-align:center;display:flex;align-items:center;gap:5px;touch-action:manipulation;white-space:nowrap}
 #sz-btn{left:10px}
 #bg-wrap{position:fixed;top:10px;left:148px;z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:5px 12px;display:flex;align-items:center;gap:6px;min-width:84px;touch-action:manipulation;cursor:pointer}
 #bg-swatch{width:18px;height:18px;border-radius:4px;flex-shrink:0;pointer-events:none;background:#fff;border:1.5px solid #000}
 #bg-label{font-size:12px;color:var(--tx2);pointer-events:none}
 /* Top button positions: 書き出し / 保存 / 開く / PSD */
 #export-btn{right:10px}
+/* 右側ボタン群: 書き出し→保存→開く→新規 (右から) */
 #bpf-save-btn{right:calc(10px + 80px + 6px)}
-#open-btn{right:calc(10px + 80px + 6px + 76px + 6px)}
-#new-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px)}
+#open-btn{right:calc(10px + 80px + 6px + 52px + 6px)}
+#new-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px)}
+#export-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px + 44px + 6px)}
 #reset-view-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
 /* rotate-canvas-btn repositioned below */
 /* New dialog */
@@ -206,7 +208,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 /* rotate moves right */
 #rotate-canvas-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px + 60px + 6px + 60px + 6px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:6px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
 /* ref-btn on right side */
-#ref-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px)}
+#ref-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px + 44px + 6px + 52px + 6px)}
 #ref-btn.on{border-color:var(--acc);color:var(--acc)}
 /* ref-panel */
 #ref-panel{left:10px;min-width:240px}
@@ -215,7 +217,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 .ref-preview.show{display:block}
 
 /* タイムラプスプレーヤー */
-#tl-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px + 60px + 6px)}
+#tl-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px + 44px + 6px + 52px + 6px + 44px + 6px)}
 #tl-overlay{position:fixed;inset:0;z-index:600;background:#000c;display:none;flex-direction:column;align-items:center;justify-content:center;touch-action:none}
 #tl-overlay.show{display:flex}
 #tl-canvas{border-radius:8px;max-width:92vw;max-height:72vh;background:#fff;image-rendering:pixelated}
@@ -251,7 +253,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 @keyframes recpulse{0%,100%{opacity:1}50%{opacity:0.3}}
 
 /* ギャラリー */
-#gallery-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px)}
+#gallery-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px + 44px + 6px + 52px + 6px + 44px + 6px + 64px + 6px)}
 #gallery-overlay{position:fixed;inset:0;z-index:550;background:#0a0a14;display:none;flex-direction:column}
 #gallery-overlay.show{display:flex}
 #gallery-header{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--bd);flex-shrink:0}
@@ -1953,6 +1955,28 @@ function renderLayers(){
     const hexCol=rgb01ToHex(layer.color);const cd=document.createElement('div');cd.className='lcd';const sw2=document.createElement('div');sw2.className='lcd-sw';sw2.style.background=hexCol;cd.appendChild(sw2);
     cd.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();openColorPicker(rgb01ToHex(layer.color),(col)=>{sw2.style.background=col;recolorLayer(layer,col);});});
     const vb=document.createElement('div');vb.className='leye'+(layer.visible?'':' hidden');vb.textContent=layer.visible?'◎':'◯';vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;_rec({type:'layer_prop',layerId:layer.id,visible:layer.visible});vb.textContent=layer.visible?'◎':'◯';vb.classList.toggle('hidden',!layer.visible);scheduleDraw();});
+    // レイヤー結合ボタン（1つ下と結合）
+    const mb=document.createElement('div');mb.className='ldel';mb.title='下と結合';mb.textContent='↓';mb.style.color='var(--aqua)';
+    mb.addEventListener('pointerdown',e=>{
+      e.stopPropagation();
+      if(i===0){showToast('最下層のため結合できません');return;}
+      const upper=gLayers[i],lower=gLayers[i-1];
+      // WebGLでupper→lower に合成（upper上にblend）
+      const r8upper=new Uint8Array(CW*CH),r8lower=new Uint8Array(CW*CH);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,upper.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8upper);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,lower.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8lower);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      // 単純合成: upper!=0 ならその値を使用、なければlower
+      for(let p=0;p<r8upper.length;p++){if(r8upper[p])r8lower[p]=r8upper[p];}
+      gl.bindTexture(gl.TEXTURE_2D,lower.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8lower);gl.bindTexture(gl.TEXTURE_2D,null);
+      // upperレイヤーを削除
+      const uid=upper.id;
+      gl.deleteTexture(upper.tex);gl.deleteFramebuffer(upper.fbo);gLayers.splice(i,1);
+      gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
+      _rec({type:'layer_delete',layerId:uid,merged:true});
+      captureNow('merge_layer');
+      scheduleDraw();renderLayers();showToast('レイヤーを結合しました');
+    });
     const db=document.createElement('div');db.className='ldel';db.textContent='✕';db.addEventListener('pointerdown',e=>{
       e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}
       setTimeout(async()=>{
@@ -1964,7 +1988,7 @@ function renderLayers(){
       },0);
     });
     // 上段: arrows + thumb + info(name) + bmodes + color + eye + del
-    item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
+    item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(mb);item.appendChild(db);
     // 下段: 不透明度スライダー（独立した行、サムネイルと重ならない）
     const opRow=document.createElement('div');opRow.style.cssText='display:flex;align-items:center;gap:6px;padding:0 5px 5px;width:100%;box-sizing:border-box';
     const opLbl=document.createElement('span');opLbl.textContent='不透明度';opLbl.style.cssText='font-size:9px;color:var(--tx2);white-space:nowrap;flex-shrink:0';
@@ -2444,6 +2468,17 @@ function spSaveCurrentTool(slotIdx){
   }
   spRenderSlots();
 }
+function _setCslValue(id,v){
+  // CSLスライダーの値とUIを更新するヘルパー
+  const el=document.getElementById(id);if(!el)return;
+  const mn=+el.dataset.min||0,mx=+el.dataset.max||100,rt=+el.dataset.ratio||3;
+  // initCslで設定した内部valにアクセスするため、touchstartをシミュレート代わりに
+  // スライダーのknobとfill要素を直接更新
+  const fill=el.querySelector('.csl-fill'),knob=el.querySelector('.csl-knob');
+  if(!fill||!knob)return;
+  const pct=(v-mn)/(mx-mn)*100;
+  fill.style.width=pct+'%';knob.style.left=pct+'%';
+}
 function spActivateTool(slotIdx){
   const slot=spSlots[slotIdx];if(!slot)return;spActiveSlot=slotIdx;spRenderSlots();
   const s=slot.settings;
@@ -2452,6 +2487,14 @@ function spActivateTool(slotIdx){
     eSize=s.sz||s.eSize||20;eMin=s.min||1;ePressure=!!s.pressure;eStab=s.stab||1;eThresh=s.thresh||0;
     if(s.pts){TOOLS.eraser.pts=s.pts.map(p=>({...p}));}
     Object.assign(TOOLS.eraser,{sz:eSize,min:eMin,pressure:ePressure,stab:eStab,thresh:eThresh});
+    // 消しゴムパネルのUI更新
+    _setCslValue('csl-esz',eSize);document.getElementById('v-esz').textContent=eSize+'px';
+    _setCslValue('csl-emsz',eMin);document.getElementById('v-emsz').textContent=eMin+'px';
+    _setCslValue('csl-estab',eStab);document.getElementById('v-estab').textContent=eStab;
+    _setCslValue('csl-er-thr',Math.round(eThresh*100));document.getElementById('v-er-thr').textContent=Math.round(eThresh*100)+'%';
+    const cbEr=document.getElementById('cb-er-pr');if(cbEr)cbEr.checked=ePressure;
+    const erPrSec=document.getElementById('er-pr-sec');if(erPrSec)erPrSec.style.opacity=ePressure?'1':'0.4';
+    drawStabOn('er-stab-cv',eStab);
   }else{
     eraserOn=false;erb.classList.remove('on');badge.classList.remove('show');
     const target=slot.type==='marker'?'marker':'pen';if(activeTool!==target)switchTool(target);
@@ -2459,6 +2502,25 @@ function spActivateTool(slotIdx){
     bThresh=s.thresh||0;
     if(s.pts)bPts=s.pts.map(p=>({...p}));
     Object.assign(TOOLS[target],{sz:bSize,min:bMin,pressure:bPressure,curve:bCurve,stab:stabLen,thresh:bThresh,pts:bPts.map(p=>({...p}))});
+    if(target==='pen'){
+      // ペンパネルUI更新
+      _setCslValue('csl-sz',bSize);document.getElementById('v-sz').textContent=bSize+'px';
+      _setCslValue('csl-msz',bMin);document.getElementById('v-msz').textContent=bMin+'px';
+      _setCslValue('csl-stab',stabLen);document.getElementById('v-stab').textContent=stabLen===0?'OFF':stabLen;
+      _setCslValue('csl-thr',Math.round(bThresh*100));document.getElementById('v-thr').textContent=Math.round(bThresh*100)+'%';
+      const cbPr=document.getElementById('cb-pr');if(cbPr)cbPr.checked=bPressure;
+      const prSec=document.getElementById('pr-sec');if(prSec)prSec.style.opacity=bPressure?'1':'0.4';
+      drawStabOn('stab-cv',stabLen);
+    } else if(target==='marker'){
+      // マーカーパネルUI更新
+      _setCslValue('csl-mk-sz',bSize);document.getElementById('v-mk-sz').textContent=bSize+'px';
+      _setCslValue('csl-mk-msz',bMin);document.getElementById('v-mk-msz').textContent=bMin+'px';
+      _setCslValue('csl-mk-stab',stabLen);document.getElementById('v-mk-stab').textContent=stabLen===0?'OFF':stabLen;
+      _setCslValue('csl-mk-thr',Math.round(bThresh*100));document.getElementById('v-mk-thr').textContent=Math.round(bThresh*100)+'%';
+      const cbMk=document.getElementById('cb-mk-pr');if(cbMk)cbMk.checked=bPressure;
+      const mkPrSec=document.getElementById('mk-pr-sec');if(mkPrSec)mkPrSec.style.opacity=bPressure?'1':'0.4';
+      drawStabOn('mk-stab-cv',stabLen);
+    }
   }
 }
 function spRenderSlots(){
@@ -2909,7 +2971,7 @@ async function requestWakeLock(){
       _wakeLock=await navigator.wakeLock.request('screen');
       _wakeLock.addEventListener('release',()=>{_wakeLock=null;});
     }
-  }catch(e){console.log('WakeLock not available:',e.message);}
+  }catch(e){/* WakeLock unavailable in iframe/permissions-policy context - OK */}
 }
 document.addEventListener('visibilitychange',async()=>{
   if(document.visibilityState==='visible'){
