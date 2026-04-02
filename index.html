@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;BinaryPaint&quot;,&quot;short_name&quot;:&quot;BPaint&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0d0d14&quot;,&quot;theme_color&quot;:&quot;#0d0d14&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230d0d14'/><text y='75' font-size='70'>✏️</text></svg>&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
+<meta name="apple-mobile-web-app-title" content="BinaryPaint">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>BinaryPaint</title>
 <style>
@@ -268,6 +270,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 .gal-action-btn{flex:1;padding:10px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:11px;cursor:pointer;touch-action:manipulation;font-family:'DM Mono',monospace}
 /* プレビューダイアログ */
 #bpf-preview-dialog{position:fixed;inset:0;z-index:600;background:#000c;display:none;align-items:center;justify-content:center}
+#bpf-preview-dialog.show{display:flex}
 #bpf-preview-box{background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:16px;max-width:320px;width:90%;max-height:80vh;overflow-y:auto}
 #bpf-preview-thumb{width:100%;max-height:200px;object-fit:contain;background:#fff;border-radius:4px;display:block;margin-bottom:10px}
 .bpf-prev-row{font-size:11px;color:var(--tx2);margin-bottom:4px}
@@ -526,11 +529,6 @@ let inkTransparent=false;
 // rulerMode: 0=OFF, 1=直線, 2=スナップ直線(H/V/45°)
 let rulerMode=0,rulerStart=null;
 
-// ── 描画スロットリング（iPadプチフリーズ対策 #1） ─────
-let drawScheduled=false;
-let lastCompositeTime=0;
-const COMPOSITE_THROTTLE_MS=12; // 描画中は約83fps上限に抑える
-
 function _mkC(w,h){
   if(typeof OffscreenCanvas!=='undefined'){try{return new OffscreenCanvas(w,h);}catch(e){}}
   return Object.assign(document.createElement('canvas'),{width:w,height:h});
@@ -543,6 +541,8 @@ const CURVE_X=[0,1/6,2/6,3/6,4/6,5/6,1];
 const DEFAULT_Y=[0,1/36,4/36,9/36,16/36,25/36,1]; // x^2の値(分母36)
 const DEFAULT_PTS=CURVE_X.map((x,i)=>({x,y:DEFAULT_Y[i]}));
 // ── ツール設定 ─────────────────────────────────────────────
+// thresh: この筆圧以下は常に1px（0=閾値なし）
+// TOOLS.pen/marker に thresh を追加
 const TOOLS={
   pen:  {sz:12,min:1,pressure:true, curve:2.0,stab:1,thresh:0.05,pts:DEFAULT_PTS.map(p=>({...p}))},
   marker:{sz:12,min:1,pressure:false,curve:2.0,stab:1,thresh:0.05,pts:DEFAULT_PTS.map(p=>({...p}))},
@@ -560,7 +560,7 @@ let stabBuf=[];
 function stabClear(){stabBuf=[];}
 function stabAdd(pt){
   const sLen=eraserOn?eStab:stabLen;
-  if(sLen<=0){stabBuf=[];return{x:pt.x,y:pt.y};}
+  if(sLen<=0){stabBuf=[];return{x:pt.x,y:pt.y};}  // 手振れ補正OFF: 即時返す
   stabBuf.push({x:pt.x,y:pt.y});if(stabBuf.length>sLen)stabBuf.shift();
   const n=stabBuf.length;return{x:stabBuf.reduce((a,p)=>a+p.x,0)/n,y:stabBuf.reduce((a,p)=>a+p.y,0)/n};
 }
@@ -701,6 +701,7 @@ void main(){
   float rc=cos(-u_ref_rot),rs=sin(-u_ref_rot);
   vec2 rot=vec2(rc*loc.x-rs*loc.y,rs*loc.x+rc*loc.y)/u_ref_scale;
   vec2 uv=(rot+u_ref_sz*.5)/u_ref_sz;
+  // UNPACK_FLIP_Y=false なので Y軸をフリップ（Canvas2D Y=0=top → GL Y=0=bottom）
   uv.y=1.0-uv.y;
   if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0)discard;
   vec4 col=texture(u_ref,uv);
@@ -713,7 +714,7 @@ function makeProgram(vs,fs){const p=gl.createProgram();gl.attachShader(p,compile
 const _ulCache=new Map();
 function ul(p,n){const k=p+'|'+n;let loc=_ulCache.get(k);if(loc===undefined){loc=gl.getUniformLocation(p,n);_ulCache.set(k,loc);}return loc;}
 
-const MAX_INST=16384;
+const MAX_INST=32768;  // バッチサイズ倍増でGPU呼び出し削減
 let brushVAO=null,instBuf=null,quadVAO=null;
 let instArr=new Float32Array(MAX_INST*3),instCount=0;
 let compA_tex=null,compA_fbo=null,compB_tex=null,compB_fbo=null;
@@ -778,33 +779,29 @@ function flushBrush(){
   gl.uniform2f(ul(PROG.brush,'u_res'),CW,CH);
   gl.uniform1f(ul(PROG.brush,'u_val'),(eraserOn||inkTransparent)?0.0:1.0);
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
-  gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;
-  scheduleDraw(); // ここは1回だけ
+  gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;scheduleDraw();
 }
-
+function scheduleMipmap(layer){}
 function queueDot(x,y,d){if(instCount>=MAX_INST)flushBrush();instArr[instCount*3]=x;instArr[instCount*3+1]=y;instArr[instCount*3+2]=d/2;instCount++;}
 function queueLine(x0,y0,x1,y1,d){const dx=x1-x0,dy=y1-y0,dist=Math.sqrt(dx*dx+dy*dy);if(dist===0)return;const step=Math.max(0.4,d/3);const n=Math.ceil(dist/step);for(let i=1;i<=n;i++){const t=i/n;queueDot(x0+dx*t,y0+dy*t,d);}}
 
+let drawScheduled=false;
+let _lastDrawTime=0;
 function scheduleDraw(){
   if(drawScheduled)return;
   drawScheduled=true;
-  const now=Date.now();
-  // 描画中（penId !== null）のときは強制的にthrottle（iPad 10/11世代向け最適化）
-  if(penId!==null && now-lastCompositeTime<COMPOSITE_THROTTLE_MS){
-    setTimeout(()=>{
-      if(drawScheduled){
-        requestAnimationFrame(compositeAndDisplay);
-        lastCompositeTime=Date.now();
-        drawScheduled=false;
-      }
-    },COMPOSITE_THROTTLE_MS-(now-lastCompositeTime));
-    return;
+  if(openPanel&&penId===null){
+    // パネル開き中でペンなし: 32ms遅延
+    setTimeout(()=>{if(drawScheduled)requestAnimationFrame(compositeAndDisplay);},32);
+  } else if(penId!==null){
+    // ストローク中: 最大60fps（16ms）に制限してGPU過負荷防止
+    const now=performance.now();
+    const wait=Math.max(0,16-(now-_lastDrawTime));
+    if(wait<2){requestAnimationFrame(compositeAndDisplay);}
+    else{setTimeout(()=>{requestAnimationFrame(compositeAndDisplay);},wait);}
+  } else {
+    requestAnimationFrame(compositeAndDisplay);
   }
-  requestAnimationFrame(()=>{
-    compositeAndDisplay();
-    lastCompositeTime=Date.now();
-    drawScheduled=false;
-  });
 }
 
 let _compU=null;
@@ -824,7 +821,7 @@ function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst,vrot){
   gl.uniform1i(u.flip,flipState?1:0);gl.uniform1f(u.vrot,vrot!==undefined?vrot:view.rot);
 }
 function compositeAndDisplay(){
-  drawScheduled=false;if(!gl)return;
+  drawScheduled=false;_lastDrawTime=performance.now();if(!gl)return;
   gl.disable(gl.BLEND);
   const visible=gLayers.filter(l=>l.visible);
   let srcTex=compA_tex,srcFBO=compA_fbo,dstTex=compB_tex,dstFBO=compB_fbo,first=true;
@@ -850,6 +847,7 @@ function compositeAndDisplay(){
 
   if(visible.length===0){
     if(!refTex){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);gl.clearColor(bgRGB[0],bgRGB[1],bgRGB[2],1);gl.clear(gl.COLOR_BUFFER_BIT);return;}
+    // 下絵のみ: srcTexをスクリーンにBlitするためコピー
     gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);
     gl.useProgram(PROG.blit);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,srcTex);gl.uniform1i(ul(PROG.blit,'u_tex'),0);
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
@@ -869,10 +867,8 @@ function compositeAndDisplay(){
 
 // ── ストローク（Catmull-Rom） ──────────────────────────────
 let _crBuf=[];
-let strokeDrawCounter=0; // ストローク中描画呼び出し回数を抑えるカウンタ
 function beginStroke(sx,sy,f){
   stabClear();_crBuf=[];
-  strokeDrawCounter=0;
   const pt=stabAdd(screenToCanvas(sx,sy)),d=calcD(f,true);
   _crBuf.push({...pt,d});
   expandDirty(pt.x,pt.y,d);
@@ -883,12 +879,12 @@ function continueStroke(sx,sy,f){
   _crBuf.push({...pt,d});
   const sLen=eraserOn?eStab:stabLen;
   if(sLen<=0){
+    // 手振れ補正OFF: Catmull-Romをスキップして直線描画（ラグなし）
     if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,pt.x,pt.y,d);
     else queueDot(pt.x,pt.y,d);
     lastDrawPt={x:pt.x,y:pt.y};
     expandDirty(pt.x,pt.y,d);
-    if(instCount>=(MAX_INST>>1))flushBrush();
-    scheduleDraw(); // ここもthrottleされる
+    if(instCount>=(MAX_INST*3>>2))flushBrush();  // 3/4まで溜めてからフラッシュ
     return;
   }
   const n=_crBuf.length;if(n<4)return;
@@ -902,20 +898,15 @@ function continueStroke(sx,sy,f){
     if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,x,y,p1.d);else queueDot(x,y,p1.d);lastDrawPt={x,y};
   }
   expandDirty(p2.x,p2.y,p2.d);
-  if(instCount>=(MAX_INST>>1))flushBrush();
-  // ストローク中は描画呼び出しを大幅に抑制（iPadプチフリーズ対策）
-  strokeDrawCounter++;
-  if(strokeDrawCounter%4===0) scheduleDraw(); // 4ポイントごとに1回だけ
+  if(instCount>=(MAX_INST*3>>2))flushBrush();  // 3/4まで溜めてからフラッシュ
 }
 function finishStroke(){
   const n=_crBuf.length;
   if(n>=2){const start=Math.max(1,n-3);for(let i=start;i<n;i++){const p=_crBuf[i];if(lastDrawPt)queueLine(lastDrawPt.x,lastDrawPt.y,p.x,p.y,p.d);lastDrawPt={x:p.x,y:p.y};}}
   if(instCount>0)flushBrush();
   lastDrawPt=null;stabClear();
-  _commitRecStroke(_crBuf.slice());
+  _commitRecStroke(_crBuf.slice()); // タイムラインに記録
   _crBuf=[];
-  strokeDrawCounter=0;
-  scheduleDraw(); // 終了時に必ず1回
 }
 
 // ── UNDO（全解像度20回 + レイヤー操作対応） ──────────────
@@ -933,13 +924,17 @@ function unpackBits(bits,n){
 }
 // ── 全操作イベント記録 Undo/Redo/タイムラプス ─────────────
 // 全ての操作を {type, ...params} として記録する純粋なイベントソーシング。
-const KEYFRAME_EVERY=50; // iPad負荷軽減のため35→50に増加（JSONキーフレーム破綻防止のため元のロジックを厳守）
+// キーフレーム（ピクセルデータ）はUNDO高速化のためだけに使用。
+// JSONエクスポートはピクセルデータなし・全操作が人間可読形式。
+
+const KEYFRAME_EVERY=50; // Nイベントごとにキーフレーム（増やしてreadPixels頻度削減）
 let timeline=[],timelinePos=-1;
 let _recStroke=null,_strokeCount=0;
 let undoBusy=false,lastCaptureTime=0;
 
 function expandDirty(x,y,r){}  // 互換性維持
 
+// ── スナップショット（UNDOキーフレーム用） ────────────────
 function readAllLayers(){
   const layers=[];
   for(const l of gLayers){
@@ -954,6 +949,7 @@ function readAllLayers(){
     activeIdx:gActiveIdx,bgColor};
 }
 
+// ── タイムライン操作 ──────────────────────────────────────
 function _tlPush(entry){
   if(timelinePos<timeline.length-1) timeline.length=timelinePos+1;
   timeline.push(entry);timelinePos=timeline.length-1;
@@ -964,9 +960,18 @@ function _tlPush(entry){
   }
 }
 function _insertKeyframe(){
-  _tlPush({type:'keyframe',snap:readAllLayers()});_strokeCount=0;
+  _strokeCount=0;
+  // アイドル時間にキーフレームを作成（メインスレッドをブロックしない）
+  const doInsert=()=>{_tlPush({type:'keyframe',snap:readAllLayers()});};
+  if(typeof requestIdleCallback!=='undefined'){
+    requestIdleCallback(doInsert,{timeout:2000});
+  } else {
+    setTimeout(doInsert,100);
+  }
 }
 
+// ── イベント記録 ──────────────────────────────────────────
+// ストローク記録
 function snapshotBeforeStroke(){
   if(!gLayers[gActiveIdx])return;
   _recStroke={
@@ -983,6 +988,7 @@ function snapshotBeforeStroke(){
 function _commitRecStroke(crBuf){
   if(!_recStroke||crBuf.length===0){_recStroke=null;return;}
   const sc=Math.max(CW,CH);
+  // 正規化座標 [x/CW, y/CH, d/max(CW,CH)] で保存（解像度非依存）
   _recStroke.points=crBuf.map(p=>([
     Math.round(p.x/CW*10000)/10000,
     Math.round(p.y/CH*10000)/10000,
@@ -996,6 +1002,7 @@ function _commitRecStroke(crBuf){
 function captureStroke(){if(penId!==null)return;}
 const deferCapture=()=>captureStroke();
 
+// 全操作イベント記録（ストローク以外）
 function _rec(ev){
   _recStroke=null;
   _tlPush(ev);
@@ -1003,6 +1010,7 @@ function _rec(ev){
   if(_strokeCount>=KEYFRAME_EVERY)_insertKeyframe();
 }
 
+// 構造変化（選択変形確定・BPFロードなど）→ キーフレーム
 function captureNow(label){
   if(undoBusy)return;
   const now=Date.now();if(now-lastCaptureTime<400)return;
@@ -1011,6 +1019,7 @@ function captureNow(label){
   _tlPush({type:'keyframe',label:label||'operation',snap:readAllLayers()});
 }
 
+// ── イベント再生 ──────────────────────────────────────────
 function _replayStroke(s,scW,scH){
   const li=gLayers.findIndex(l=>l.id===s.layerId);if(li<0)return;
   gActiveIdx=li;eraserOn=s.eraserOn;inkTransparent=s.inkTransparent;
@@ -1029,7 +1038,7 @@ function _replayStroke(s,scW,scH){
       const y=0.5*((2*p1.y)+(-p0.y+p2.y)*t+(2*p0.y-5*p1.y+4*p2.y-p3.y)*t2+(-p0.y+3*p1.y-3*p2.y+p3.y)*t3);
       queueLine(last.x,last.y,x,y,p1.d);last={x,y};
     }
-    if(instCount>=(MAX_INST>>1))flushBrush();
+    if(instCount>=(MAX_INST*3>>2))flushBrush();  // 3/4まで溜めてからフラッシュ
   }
   const n=dp.length;
   if(n>=2){const st=Math.max(1,n-3);for(let i=st;i<n;i++){const p=dp[i];queueLine(last.x,last.y,p.x,p.y,p.d);last={x:p.x,y:p.y};}}
@@ -1127,8 +1136,10 @@ function redo(){if(undoBusy){showToast('処理中…');return;}if(timelinePos>=t
 // ── キャンバス再生システム ────────────────────────────────
 let isReplaying=false,_replayPaused=false,_replayPos=0,_replayTimer=null;
 
+// 再生中はペン入力をブロック
 function replayBlocksPen(){return isReplaying;}
 
+// イベントをキャンバスに実行（レイヤー状態を正確に復元）
 function _execReplayEvent(ev){
   if(ev.type==='keyframe'){
     _restoreKeyframeSnap(ev.snap);
@@ -1171,6 +1182,7 @@ function _replayFinish(){
   document.getElementById('replay-bar').classList.remove('show');
   document.getElementById('tl-btn').textContent='再生';
   document.getElementById('rec-dot').classList.remove('show');
+  // 現在のtimelinePosに戻す
   _restoreToPos(timelinePos);
   showToast('再生完了');
 }
@@ -1182,6 +1194,7 @@ function startCanvasReplay(){
   document.getElementById('replay-bar').classList.add('show');
   document.getElementById('tl-btn').textContent='■ 停止';
   document.getElementById('replay-playpause').textContent='⏸';
+  // 最初のキーフレームで初期状態に戻す
   const firstKF=timeline.find(e=>e.type==='keyframe');
   if(firstKF)_restoreKeyframeSnap(firstKF.snap);
   else{gLayers.forEach(l=>{gl.bindFramebuffer(gl.FRAMEBUFFER,l.fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);});}
@@ -1206,13 +1219,16 @@ function pauseResumeReplay(){
   if(!_replayPaused)_replayStep();
 }
 
+// プログレスバーでスクラブ
 function replaySeek(ratio){
   if(!isReplaying)return;
   clearTimeout(_replayTimer);
   const newPos=Math.round(Math.max(0,Math.min(1,ratio))*timeline.length);
+  // 最初のキーフレームから newPos まで巻き戻し
   const firstKF=timeline.find(e=>e.type==='keyframe');
   if(firstKF)_restoreKeyframeSnap(firstKF.snap);
   _replayPos=0;
+  // 高速で newPos まで適用
   for(let i=0;i<newPos&&i<timeline.length;i++){
     const ev=timeline[i];
     if(ev.type==='keyframe')_restoreKeyframeSnap(ev.snap);
@@ -1224,6 +1240,7 @@ function replaySeek(ratio){
   if(!_replayPaused)_replayStep();
 }
 
+
 // ── JSON エクスポート（全操作・ピクセルデータなし） ────────
 function tlExportJSON(){
   const data={
@@ -1233,8 +1250,9 @@ function tlExportJSON(){
     layers:gLayers.map(l=>({id:l.id,name:l.name,color:l.color,opacity:l.opacity,visible:l.visible,blend:l.blend})),
     eventCount:0,events:[]
   };
+  // キーフレーム以外の全操作イベント
   for(const ev of timeline){
-    if(ev.type==='keyframe')continue;
+    if(ev.type==='keyframe')continue; // ピクセルデータは含めない
     const out={type:ev.type};
     if(ev.type==='stroke'){
       const col=ev.layerColor||[0,0,0];
@@ -1244,7 +1262,7 @@ function tlExportJSON(){
       out.eraserMode=ev.eraserOn;out.inkTransparent=ev.inkTransparent;
       out.brushSize=ev.brushSize;out.brushMin=ev.brushMin;
       out.pointCount=ev.points.length;
-      out.points=ev.points;
+      out.points=ev.points; // [[x0-1,y0-1,d0-1],...]
       out.desc=`${ev.eraserOn?'消しゴム':ev.tool} ストローク ${ev.points.length}点 レイヤー「${ev.layerName}」`;
     } else if(ev.type==='fill'){
       const li=gLayers.find(l=>l.id===ev.layerId);
@@ -1294,6 +1312,7 @@ function tlExportJSON(){
   showToast(`JSON書き出し完了（${data.events.length}イベント）`);
 }
 
+
 // ── レイヤー管理 ──────────────────────────────────────────
 function hexToRGB01(hex){return[parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255];}
 function hexToRGBint(hex){return[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)];}
@@ -1333,46 +1352,1215 @@ function saveState(){
 }
 function loadState(){
   try{
-    const saved=JSON.parse(localStorage.getItem(LS_KEY));
-    if(!saved)return;
-    if(saved.tools){
-      Object.assign(TOOLS.pen,saved.tools.pen||{});
-      Object.assign(TOOLS.marker,saved.tools.marker||{});
-      Object.assign(TOOLS.eraser,saved.tools.eraser||{});
+    const raw=localStorage.getItem(LS_KEY);if(!raw)return false;const s=JSON.parse(raw);
+    if(s.tools){
+      if(s.tools.pen)Object.assign(TOOLS.pen,s.tools.pen);
+      if(s.tools.marker)Object.assign(TOOLS.marker,s.tools.marker);
+      if(s.tools.eraser)Object.assign(TOOLS.eraser,s.tools.eraser);
     }
-    if(saved.activeTool)activeTool=saved.activeTool;
-    if(saved.eraserOn!==undefined)eraserOn=saved.eraserOn;
-    if(saved.erbMode)erbMode=saved.erbMode;
-    if(saved.eSize)eSize=saved.eSize;
-    if(saved.bgColor)applyBg(saved.bgColor);
-    if(saved.view){view=saved.view;}
-    if(saved.flipState!==undefined)flipState=saved.flipState;
-    if(saved.inkTransparent!==undefined)inkTransparent=saved.inkTransparent;
-    if(saved.rulerMode!==undefined)rulerMode=saved.rulerMode;
-    if(saved.subPalettePos)spPos=saved.subPalettePos;
-    if(saved.subPaletteMin!==undefined)spMinimized=saved.subPaletteMin;
-    if(saved.subSlots)spSlots=saved.subSlots;
-    if(saved.subActiveSlot!==undefined)spActiveSlot=saved.subActiveSlot;
-    loadToolState(activeTool);
-    syncFlipBtn();syncRulerBtn();
-  }catch(e){}
+    if(s.activeTool)activeTool=s.activeTool;loadToolState(activeTool);
+    if(s.eraserOn!==undefined)eraserOn=s.eraserOn;
+    if(s.erbMode)erbMode=s.erbMode;if(s.eSize)eSize=s.eSize;
+    if(s.bgColor)applyBg(s.bgColor);
+    if(s.view)Object.assign(view,s.view);
+    if(s.flipState!==undefined)flipState=s.flipState;
+    if(s.inkTransparent!==undefined)inkTransparent=s.inkTransparent;
+    if(s.rulerMode!==undefined)rulerMode=typeof s.rulerMode==='boolean'?(s.rulerMode?1:0):s.rulerMode;
+    if(s.subPalettePos)spPos={...spPos,...s.subPalettePos};
+    if(s.subPaletteMin!==undefined)spMinimized=s.subPaletteMin;
+    if(s.subSlots)spSlots=s.subSlots;
+    if(s.subActiveSlot!==undefined)spActiveSlot=s.subActiveSlot;
+    return true;
+  }catch(e){return false;}
 }
 
-// ── readR8Full / writeR8Full（floodFill用） ───────────────
-function readR8Full(layer){
-  const raw=new Uint8Array(CW*CH);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,layer.fbo);
-  gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
-  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
-  return raw;
+const prc=document.getElementById('prc');
+function updPRC(x,y,f){
+  prc.style.display='block';prc.style.left=x+'px';prc.style.top=y+'px';
+  const d=calcD(f||.5,false),sz=Math.max(3,d>0?d*view.scale:view.scale);
+  prc.style.width=sz+'px';prc.style.height=sz+'px';
+  prc.style.borderColor=eraserOn?'#f87171':'#ffffff';
 }
-function writeR8Full(layer,raw){
-  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
-  gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
+// ── サムネイル ────────────────────────────────────────────
+const TSIZE=34;let thumbTex=null,thumbFBO=null,thumbsDebounceTimer=null;
+function ensureThumbFBO(){if(thumbTex)return;thumbTex=makeRGBATexture(TSIZE,TSIZE);thumbFBO=makeFBO(thumbTex);}
+function debouncedUpdateThumbs(){
+  clearTimeout(thumbsDebounceTimer);
+  thumbsDebounceTimer=setTimeout(()=>{
+    if(!gl||openPanel!=='layers')return;ensureThumbFBO();
+    gLayers.forEach(l=>{
+      const el=document.getElementById('th-'+l.id);if(!el)return;
+      gl.bindFramebuffer(gl.FRAMEBUFFER,thumbFBO);gl.viewport(0,0,TSIZE,TSIZE);gl.disable(gl.BLEND);
+      gl.useProgram(PROG.comp);
+      gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_layer'),0);
+      gl.uniform3fv(ul(PROG.comp,'u_color'),l.color);gl.uniform1f(ul(PROG.comp,'u_opacity'),1.0);gl.uniform1i(ul(PROG.comp,'u_blend'),0);
+      gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_base'),1);
+      gl.uniform1i(ul(PROG.comp,'u_first'),1);gl.uniform3fv(ul(PROG.comp,'u_bg'),bgRGB);
+      const ts=Math.min(TSIZE/CW,TSIZE/CH),ox=(TSIZE-CW*ts)/2,oy=(TSIZE-CH*ts)/2;
+      gl.uniform2f(ul(PROG.comp,'u_screen'),TSIZE,TSIZE);gl.uniform2f(ul(PROG.comp,'u_canvas'),CW,CH);
+      gl.uniform2f(ul(PROG.comp,'u_vxy'),ox,oy);gl.uniform1f(ul(PROG.comp,'u_vscale'),ts);
+      gl.uniform1i(ul(PROG.comp,'u_flip'),0);gl.uniform1f(ul(PROG.comp,'u_vrot'),0);
+      gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+      const small=new Uint8Array(TSIZE*TSIZE*4);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,thumbFBO);gl.readPixels(0,0,TSIZE,TSIZE,gl.RGBA,gl.UNSIGNED_BYTE,small);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      const ctx=el.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,TSIZE,TSIZE);
+      const flipped=new Uint8Array(TSIZE*TSIZE*4);
+      for(let row=0;row<TSIZE;row++){const s=(TSIZE-1-row)*TSIZE*4;flipped.set(small.subarray(s,s+TSIZE*4),row*TSIZE*4);}
+      ctx.putImageData(new ImageData(new Uint8ClampedArray(flipped.buffer),TSIZE,TSIZE),0,0);
+    });
+  },1200);
+}
+
+// ── セレクション ────────────────────────────────────────────
+let selState=null,lassoPath=[],origLassoPath=[];
+let selBBox=null,selImg=null,selOrig=null,selTx=null,selHandle=null,selPrevPt=null,meshPts=null;
+const selOv=document.getElementById('sel-ov'),sovCtx=selOv.getContext('2d');
+function resizeSelOv(){selOv.width=window.innerWidth;selOv.height=window.innerHeight;}resizeSelOv();
+const selHintEl=document.getElementById('sel-hint');
+function setSelHint(m){if(m){selHintEl.textContent=m;selHintEl.classList.add('show');}else selHintEl.classList.remove('show');}
+function initMesh(){meshPts=[];for(let r=0;r<=4;r++){meshPts.push([]);for(let c=0;c<=4;c++)meshPts[r].push({dx:0,dy:0});}}
+function meshPtW(r,c){if(!selBBox||!selTx||!meshPts)return{x:0,y:0};const{cx,cy,rot,sx,sy}=selTx,lx=(c/4-.5)*selBBox.w*sx,ly=(r/4-.5)*selBBox.h*sy;const cos=Math.cos(rot),sin=Math.sin(rot);return{x:cos*lx-sin*ly+cx+meshPts[r][c].dx,y:sin*lx+cos*ly+cy+meshPts[r][c].dy};}
+function meshPtS(r,c){const p=meshPtW(r,c);return canvasToScreen(p.x,p.y);}
+function getHandles(){
+  if(!selTx||!selBBox)return{};
+  const{cx,cy,rot,sx,sy}=selTx,hw=selBBox.w*sx/2,hh=selBBox.h*sy/2;
+  const cos=Math.cos(rot),sin=Math.sin(rot);
+  const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  // 拡大縮小・回転ハンドルはグリッド点と競合しないよう外側に配置
+  // グリッドは選択範囲内に存在するため、ハンドルはbboxより大きく外側に配置
+  const PAD=28/view.scale; // 外側オフセット（スクリーン28px相当）
+  const hw2=hw+PAD,hh2=hh+PAD;
+  const rpo=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  return{
+    // スケールハンドル（外側拡大版）
+    TL:rpo(-hw2,-hh2),TC:rpo(0,-hh2),TR:rpo(hw2,-hh2),
+    ML:rpo(-hw2,0),MR:rpo(hw2,0),
+    BL:rpo(-hw2,hh2),BC:rpo(0,hh2),BR:rpo(hw2,hh2),
+    // 回転ハンドルはさらに外側
+    ROT:rpo(0,-hh2-44/view.scale)
+  };
+}
+function hitHandle(sx,sy){
+  if(selState!=='transform')return null;
+  const H=getHandles(),R=24;
+  // 1. まずスケール・回転ハンドルを判定（最優先）
+  for(const[n,p]of Object.entries(H)){const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'h:'+n;}
+  // 2. メッシュグリッド点
+  if(meshPts)for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){
+    const sp=meshPtS(r,c),dx=sx-sp.x,dy=sy-sp.y;if(dx*dx+dy*dy<R*R)return`m:${r}:${c}`;
+  }
+  // 3. bbox内はグリッド操作のみ（MOVE判定しない）
+  // bbox外のどこでもMOVE（画面全体で移動可能）
+  return'h:MOVE';
+}
+function applyHandle(h,psx,psy,csx,csy){
+  const pC=screenToCanvas(psx,psy),cC=screenToCanvas(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
+  if(h==='h:MOVE'){selTx.cx+=dx;selTx.cy+=dy;}
+  else if(h==='h:ROT')selTx.rot+=Math.atan2(cC.y-selTx.cy,cC.x-selTx.cx)-Math.atan2(pC.y-selTx.cy,pC.x-selTx.cx);
+  else if(/^h:(TL|TR|BL|BR)$/.test(h)){const pd=Math.hypot(pC.x-selTx.cx,pC.y-selTx.cy),cd=Math.hypot(cC.x-selTx.cx,cC.y-selTx.cy);if(pd>1){const sc=cd/pd;selTx.sx*=sc;selTx.sy*=sc;}}
+  else if(h==='h:TC'||h==='h:BC'){const cos=Math.cos(selTx.rot),sin=Math.sin(selTx.rot),dot=dx*(-sin)+dy*cos;selTx.sy=Math.max(.05,(selBBox.h*selTx.sy/2+dot*(h==='h:TC'?-1:1))*2/selBBox.h);}
+  else if(h==='h:ML'||h==='h:MR'){const cos=Math.cos(selTx.rot),sin=Math.sin(selTx.rot),dot=dx*cos+dy*sin;selTx.sx=Math.max(.05,(selBBox.w*selTx.sx/2+dot*(h==='h:ML'?-1:1))*2/selBBox.w);}
+  else if(h.startsWith('m:')){const[,r,c]=h.split(':');meshPts[+r][+c].dx+=dx;meshPts[+r][+c].dy+=dy;}
+  drawSelOv();
+}
+function r8ToRGBACanvas(r8,w,h,color){
+  const tc=document.createElement('canvas');tc.width=w;tc.height=h;const ctx=tc.getContext('2d');
+  const rgba=new Uint8ClampedArray(w*h*4);const[ir,ig,ib]=[Math.round(color[0]*255),Math.round(color[1]*255),Math.round(color[2]*255)];
+  for(let row=0;row<h;row++){const srcRow=h-1-row;for(let col=0;col<w;col++){const on=r8[srcRow*w+col]>127;const oi=(row*w+col)*4;rgba[oi]=on?ir:0;rgba[oi+1]=on?ig:0;rgba[oi+2]=on?ib:0;rgba[oi+3]=on?255:0;}}
+  ctx.putImageData(new ImageData(rgba,w,h),0,0);return tc;
+}
+function canvasToR8(canvasEl,w,h){const ctx=canvasEl.getContext('2d');const id=ctx.getImageData(0,0,w,h);const r8=new Uint8Array(w*h);for(let row=0;row<h;row++){const dstRow=h-1-row;for(let col=0;col<w;col++){r8[dstRow*w+col]=id.data[(row*w+col)*4+3]>127?255:0;}}return r8;}
+const SEAM=0.8;
+function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
+  const gcx=(x0+x1+x2)/3,gcy=(y0+y1+y2)/3;
+  function exp(x,y){const dx=x-gcx,dy=y-gcy,d=Math.hypot(dx,dy)||1;return[x+dx/d*SEAM,y+dy/d*SEAM];}
+  const[ex0,ey0]=exp(x0,y0),[ex1,ey1]=exp(x1,y1),[ex2,ey2]=exp(x2,y2);
+  const du1=u1-u0,du2=u2-u0,dv1=v1-v0,dv2=v2-v0,det=du1*dv2-du2*dv1;if(Math.abs(det)<.0001)return;
+  const dx1=ex1-ex0,dx2=ex2-ex0,dy1=ey1-ey0,dy2=ey2-ey0;
+  const a=(dx1*dv2-dx2*dv1)/det,b=(dy1*dv2-dy2*dv1)/det,cc=(du1*dx2-du2*dx1)/det,d=(du1*dy2-du2*dy1)/det;
+  const e=ex0-a*u0-cc*v0,ff=ey0-b*u0-d*v0;
+  ctx.save();ctx.beginPath();ctx.moveTo(ex0,ey0);ctx.lineTo(ex1,ey1);ctx.lineTo(ex2,ey2);ctx.closePath();ctx.clip();ctx.transform(a,b,cc,d,e,ff);ctx.drawImage(src,0,0,srcW,srcH);ctx.restore();
+}
+function drawMeshWarp(ctx,src,srcW,srcH,coordFn){const cw=srcW/4,ch=srcH/4;for(let row=0;row<4;row++)for(let col=0;col<4;col++){const p00=coordFn(row,col),p10=coordFn(row,col+1),p01=coordFn(row+1,col),p11=coordFn(row+1,col+1);const u0=col*cw,u1=(col+1)*cw,v0=row*ch,v1=(row+1)*ch;drawTriTex(ctx,src,srcW,srcH,p00.x,p00.y,p10.x,p10.y,p01.x,p01.y,u0,v0,u1,v0,u0,v1);drawTriTex(ctx,src,srcW,srcH,p10.x,p10.y,p11.x,p11.y,p01.x,p01.y,u1,v0,u1,v1,u0,v1);}}
+function setSelState(s){selState=s;const btn=document.getElementById('sel-btn');btn.className='leftbtn';if(s==='lasso'){btn.classList.add('lasso');setSelHint('なげなわで範囲を描いてください');}else if(s==='transform'){btn.classList.add('transform');setSelHint('ハンドル/メッシュ点で変形 → 再タップで確定');}else setSelHint(null);drawSelOv();}
+function readR8Full(l){const buf=new Uint8Array(CW*CH);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,buf);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);return buf;}
+function writeR8Full(l,r8){gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);scheduleDraw();}
+async function execLasso(){
+  const l=gLayers[gActiveIdx];if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
+  captureNow();
+  const xs=lassoPath.map(p=>p.x),ys=lassoPath.map(p=>p.y);
+  let bx=Math.max(0,Math.floor(Math.min(...xs))),by=Math.max(0,Math.floor(Math.min(...ys)));
+  let bw=Math.min(CW-bx,Math.ceil(Math.max(...xs))-bx+1),bh=Math.min(CH-by,Math.ceil(Math.max(...ys))-by+1);
+  if(bw<4||bh<4){lassoPath=[];setSelState(null);showToast('選択範囲が小さすぎます');return;}
+  selBBox={x:bx,y:by,w:bw,h:bh};origLassoPath=[...lassoPath];
+
+  const r8=new Uint8Array(CW*CH);r8.set(readR8Full(l));
+  const[ir,ig,ib]=[Math.round(l.color[0]*255),Math.round(l.color[1]*255),Math.round(l.color[2]*255)];
+
+  // マスク（bbox内のみ、full-size RGBA不要）
+  const mc=document.createElement('canvas');mc.width=bw;mc.height=bh;
+  const mctx=mc.getContext('2d');mctx.fillStyle='#fff';mctx.beginPath();
+  lassoPath.forEach((p,i)=>{i?mctx.lineTo(p.x-bx,p.y-by):mctx.moveTo(p.x-bx,p.y-by);});mctx.closePath();mctx.fill();
+  const maskData=mctx.getImageData(0,0,bw,bh).data;
+  await new Promise(r=>setTimeout(r,0));
+
+  // selImg: bboxサイズのみ作成（CW×CHの大canvasを避ける）
+  const selRGBA=new Uint8ClampedArray(bw*bh*4);
+  for(let row=0;row<bh;row++){
+    const srcRow=CH-1-(by+row);
+    for(let col=0;col<bw;col++){
+      const inMask=maskData[(row*bw+col)*4+3]>127;
+      const hasInk=inMask&&r8[srcRow*CW+(bx+col)]>127;
+      const oi=(row*bw+col)*4;
+      selRGBA[oi]=hasInk?ir:0;selRGBA[oi+1]=hasInk?ig:0;selRGBA[oi+2]=hasInk?ib:0;selRGBA[oi+3]=hasInk?255:0;
+    }
+  }
+  const ec=document.createElement('canvas');ec.width=bw;ec.height=bh;
+  ec.getContext('2d').putImageData(new ImageData(selRGBA,bw,bh),0,0);
+  selImg=ec;
+  await new Promise(r=>setTimeout(r,0));
+
+  // レイヤーからマスク部分を消去（R8直接操作）
+  const clr=r8.slice();
+  for(let row=0;row<bh;row++){
+    const fboR=CH-1-(by+row);
+    for(let col=0;col<bw;col++){
+      if(maskData[(row*bw+col)*4+3]>127)clr[fboR*CW+(bx+col)]=0;
+    }
+  }
+  writeR8Full(l,clr);
+  selTx={cx:bx+bw/2,cy:by+bh/2,rot:0,sx:1,sy:1};lassoPath=[];initMesh();setSelState('transform');
+}
+async function commitTransform(){
+  if(!selImg||!selBBox||!selTx)return;const l=gLayers[gActiveIdx];if(!l)return;
+  const{cx,cy,rot,sx,sy}=selTx;
+
+  // 変形後の選択内容を描画するキャンバス（full-size）
+  const tc=document.createElement('canvas');tc.width=CW;tc.height=CH;const tctx=tc.getContext('2d');
+  await new Promise(r=>setTimeout(r,0));
+
+  if(meshPts){
+    drawMeshWarp(tctx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtW(r,c));
+  }else{
+    tctx.save();tctx.translate(cx,cy);tctx.rotate(rot);tctx.scale(sx,sy);tctx.drawImage(selImg,-selBBox.w/2,-selBBox.h/2,selBBox.w,selBBox.h);tctx.restore();
+  }
+  await new Promise(r=>setTimeout(r,0));
+
+  // 変形キャンバスからR8を取得して現在のR8にORで合成（白背景を無視）
+  const newR8=new Uint8Array(CW*CH);
+  const imgData=tctx.getImageData(0,0,CW,CH).data;
+  for(let row=0;row<CH;row++){const dstRow=CH-1-row;for(let col=0;col<CW;col++){if(imgData[(row*CW+col)*4+3]>127)newR8[dstRow*CW+col]=255;}}
+  await new Promise(r=>setTimeout(r,0));
+
+  // 既存レイヤーのR8とOR合成して書き戻す
+  const curR8=readR8Full(l);
+  for(let i=0;i<curR8.length;i++)if(newR8[i])curR8[i]=255;
+  writeR8Full(l,curR8);
+
+  selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];
+  document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();setTimeout(captureNow,0);showToast('変形確定');
+}
+function cancelSel(){selState=null;selBBox=null;selImg=null;selTx=null;meshPts=null;selHandle=null;selPrevPt=null;origLassoPath=[];lassoPath=[];document.getElementById('sel-btn').className='leftbtn';setSelHint(null);drawSelOv();}
+function drawSelOv(){
+  sovCtx.clearRect(0,0,selOv.width,selOv.height);
+  if(selState==='lasso'&&lassoPath.length>1){sovCtx.save();sovCtx.strokeStyle='#5b9cf6';sovCtx.lineWidth=2;sovCtx.setLineDash([5,4]);sovCtx.beginPath();lassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.stroke();sovCtx.restore();}
+  if(rulerMode>0&&rulerStart&&penId!==null){
+    const s=canvasToScreen(rulerStart.x,rulerStart.y);
+    if(rulerPreviewPt){sovCtx.save();sovCtx.strokeStyle='#38d9d9';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);sovCtx.beginPath();sovCtx.moveTo(s.x,s.y);sovCtx.lineTo(rulerPreviewPt.x,rulerPreviewPt.y);sovCtx.stroke();sovCtx.restore();}
+  }
+  drawRefHandles(sovCtx);
+  if(selState==='transform'&&selImg&&selBBox&&selTx){
+    if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
+    drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
+    const H=getHandles(),corners=[H.TL,H.TR,H.BR,H.BL];sovCtx.save();sovCtx.strokeStyle='#f97316';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);sovCtx.beginPath();corners.forEach((p,i)=>i?sovCtx.lineTo(p.x,p.y):sovCtx.moveTo(p.x,p.y));sovCtx.closePath();sovCtx.stroke();sovCtx.setLineDash([2,3]);sovCtx.strokeStyle='#f97316';sovCtx.beginPath();sovCtx.moveTo(H.TC.x,H.TC.y);sovCtx.lineTo(H.ROT.x,H.ROT.y);sovCtx.stroke();sovCtx.restore();
+    ['TL','TC','TR','ML','MR','BL','BC','BR'].forEach(n=>{const p=H[n];if(!p)return;sovCtx.save();sovCtx.fillStyle='#fff';sovCtx.strokeStyle='#f97316';sovCtx.lineWidth=1.5;sovCtx.beginPath();sovCtx.rect(p.x-7,p.y-7,14,14);sovCtx.fill();sovCtx.stroke();sovCtx.restore();});
+    const rp=H.ROT;sovCtx.save();sovCtx.fillStyle='#fff';sovCtx.strokeStyle='#f97316';sovCtx.lineWidth=2;sovCtx.beginPath();sovCtx.arc(rp.x,rp.y,9,0,Math.PI*2);sovCtx.fill();sovCtx.stroke();sovCtx.restore();
+    if(meshPts){sovCtx.save();sovCtx.strokeStyle='#80401a';sovCtx.lineWidth=1;sovCtx.setLineDash([]);for(let r=0;r<=4;r++){sovCtx.beginPath();for(let c=0;c<=4;c++){const sp=meshPtS(r,c);c?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);}sovCtx.stroke();}for(let c=0;c<=4;c++){sovCtx.beginPath();for(let r=0;r<=4;r++){const sp=meshPtS(r,c);r?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);}sovCtx.stroke();}for(let r=0;r<=4;r++)for(let c=0;c<=4;c++){const sp=meshPtS(r,c);sovCtx.beginPath();sovCtx.arc(sp.x,sp.y,5,0,Math.PI*2);sovCtx.fillStyle='#f97316';sovCtx.fill();}sovCtx.restore();}
+  }
+}
+
+let rulerPreviewPt=null;
+function isStylusT(t){return t.touchType==='stylus';}
+function getStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return list[i];return null;}
+const TAB_MAP={'tab-br':'brush','tab-mk':'marker','tab-er':'eraser','tab-ly':'layers','tab-dot':null};
+function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette,#sel-btn,#flip-btn,#color-btn,#erb,#ruler-btn,#bg-wrap,#sz-btn,#export-btn,#bpf-save-btn,#open-btn,#fill-btn,#ref-btn'))return'ui';return'canvas';}
+document.addEventListener('touchstart',function(e){
+  const st=getStylusT(e.changedTouches);if(!st)return;
+  // カラーピッカー表示中・再生中はペン処理をスキップ
+  if(cpModal.classList.contains('show'))return;
+  if(isReplaying)return;
+  const hitEl=document.elementFromPoint(st.clientX,st.clientY);
+  if(hitEl){const tab=hitEl.closest('.rtab');if(tab&&TAB_MAP[tab.id]){e.preventDefault();openPanelFn(TAB_MAP[tab.id]);return;}}
+  const tgt=classifyPenTarget(st.clientX,st.clientY);
+  if(tgt==='panel')return;if(tgt==='ui'){closePanel();return;}
+  e.preventDefault();
+  if(openPanel)closePanel();
+  document.getElementById('sz-panel').classList.remove('open');document.getElementById('sv-panel').classList.remove('open');
+  if(penId!==null&&penId!==st.identifier){finishStroke();penId=null;}
+  penId=st.identifier;
+  if(selState==='lasso'){lassoPath.push(screenToCanvas(st.clientX,st.clientY));drawSelOv();return;}
+  if(selState==='transform'){
+    const h=hitHandle(st.clientX,st.clientY);
+    selHandle=h||null;
+    selPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // 下絵変形モード
+  if(subMode==='ref'&&refImgEl){
+    _refHandle=hitRefHandle(st.clientX,st.clientY);
+    _refPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // 塗りつぶしモード
+  if(subMode==='fill'){
+    const cp=screenToCanvas(st.clientX,st.clientY);
+    floodFill(cp.x,cp.y);
+    penId=null;return;
+  }
+  // 定規モード
+  if(rulerMode>0){snapshotBeforeStroke();if(_recStroke)_recStroke.tool='ruler';rulerStart=screenToCanvas(st.clientX,st.clientY);rulerPreviewPt={x:st.clientX,y:st.clientY};drawSelOv();return;}
+  updPRC(st.clientX,st.clientY,st.force);schedulePanelAutoClose();
+  snapshotBeforeStroke(); // ペン接触の瞬間に全面読み出し（描画前・安全）
+  beginStroke(st.clientX,st.clientY,st.force);
+},{passive:false,capture:true});
+document.addEventListener('touchmove',function(e){
+  if(penId===null)return;
+  let st=null;for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(t.identifier===penId&&isStylusT(t)){st=t;break;}}
+  if(!st)return;e.preventDefault();
+  if(selState==='lasso'){const pt=screenToCanvas(st.clientX,st.clientY),last=lassoPath[lassoPath.length-1];if(!last||Math.hypot(pt.x-last.x,pt.y-last.y)>2){lassoPath.push(pt);drawSelOv();}return;}
+  if(selState==='transform'){
+    if(selHandle&&selPrevPt){applyHandle(selHandle,selPrevPt.x,selPrevPt.y,st.clientX,st.clientY);}
+    selPrevPt={x:st.clientX,y:st.clientY};
+    return;
+  }
+  // 下絵変形
+  if(subMode==='ref'&&_refHandle&&_refPrevPt){
+    applyRefHandle(_refHandle,_refPrevPt.x,_refPrevPt.y,st.clientX,st.clientY);
+    _refPrevPt={x:st.clientX,y:st.clientY};drawSelOv();return;
+  }
+  // 塗りつぶしモード: touchmoveは無視
+  if(subMode==='fill')return;
+  // 定規モード（プレビュー更新）
+  if(rulerMode>0&&rulerStart){
+    let ex=st.clientX,ey=st.clientY;
+    if(rulerMode===2){
+      // スナップモード: H/V/45°に最も近い方向にスナップ
+      const endC=screenToCanvas(ex,ey);
+      const dx=endC.x-rulerStart.x,dy=endC.y-rulerStart.y;
+      const ang=Math.atan2(dy,dx); // -π〜π
+      const snap45=Math.round(ang/(Math.PI/4))*(Math.PI/4);
+      const dist=Math.hypot(dx,dy);
+      const snapC={x:rulerStart.x+Math.cos(snap45)*dist,y:rulerStart.y+Math.sin(snap45)*dist};
+      const sp=canvasToScreen(snapC.x,snapC.y);ex=sp.x;ey=sp.y;
+    }
+    rulerPreviewPt={x:ex,y:ey};updPRC(st.clientX,st.clientY,st.force);drawSelOv();return;
+  }
+  updPRC(st.clientX,st.clientY,st.force);
+  const evs=e.getCoalescedTouches?e.getCoalescedTouches(st):[];
+  if(evs.length>0)for(const c of evs)continueStroke(c.clientX,c.clientY,c.force);
+  else continueStroke(st.clientX,st.clientY,st.force);
+  if(instCount>0)flushBrush();
+},{passive:false,capture:true});
+document.addEventListener('touchend',function(e){
+  if(penId===null)return;
+  let st=null;for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){st=e.changedTouches[i];break;}
+  if(!st)return;e.preventDefault();prc.style.display='none';penId=null;
+  // 定規モード（直線を引く）
+  if(rulerMode>0&&rulerStart){
+    let endSX=st.clientX,endSY=st.clientY;
+    if(rulerMode===2){
+      const endC=screenToCanvas(endSX,endSY);
+      const dx=endC.x-rulerStart.x,dy=endC.y-rulerStart.y;
+      const ang=Math.atan2(dy,dx);
+      const snap45=Math.round(ang/(Math.PI/4))*(Math.PI/4);
+      const dist=Math.hypot(dx,dy);
+      const snapC={x:rulerStart.x+Math.cos(snap45)*dist,y:rulerStart.y+Math.sin(snap45)*dist};
+      const sp=canvasToScreen(snapC.x,snapC.y);endSX=sp.x;endSY=sp.y;
+    }
+    const endPt=screenToCanvas(endSX,endSY);
+    const d=Math.max(1,calcD(st.force||0.5,false));
+    queueLine(rulerStart.x,rulerStart.y,endPt.x,endPt.y,d);flushBrush();
+    _commitRecStroke([{x:rulerStart.x,y:rulerStart.y,d},{x:endPt.x,y:endPt.y,d}]);
+    rulerStart=null;rulerPreviewPt=null;drawSelOv();return;
+  }
+  if(selState==='transform'){selHandle=null;selPrevPt=null;return;}
+  if(subMode==='ref'){_refHandle=null;_refPrevPt=null;return;}
+  if(subMode==='fill'){penId=null;return;}
+  selHandle=null;selPrevPt=null;if(selState==='lasso'){drawSelOv();return;}
+  finishStroke();captureStroke();
+},{passive:false,capture:true});
+document.addEventListener('touchcancel',function(e){
+  if(penId===null)return;
+  for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;rulerStart=null;rulerPreviewPt=null;finishStroke();captureStroke();break;}
+},{passive:false,capture:true});
+
+// ── 指ナビ ────────────────────────────────────────────────
+function hasStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return true;return false;}
+function isNativeEl(el){if(!el)return false;if(['INPUT','BUTTON','LABEL'].includes(el.tagName))return true;if(el.closest)return el.closest('.toppanel,.topbtn,#bg-wrap,#tab-dot,#cpicker-modal')!==null;return false;}
+function rebuildNav(){
+  const fp=[...ftouches.values()];
+  if(!fp.length){panBase=null;pinchBase=null;}
+  else if(fp.length===1){panBase={px:flipNavX(fp[0].x),py:fp[0].y,vx:view.x,vy:view.y};pinchBase=null;}
+  else{
+    const[a,b]=fp;const lax=flipNavX(a.x),lbx=flipNavX(b.x);
+    const angle=Math.atan2(b.y-a.y,lbx-lax);
+    pinchBase={dist:Math.hypot(lbx-lax,b.y-a.y),scale:view.scale,rot:view.rot,angle,vx:view.x,vy:view.y,mx:(lax+lbx)/2,my:(a.y+b.y)/2};panBase=null;
+  }
+}
+document.addEventListener('touchstart',function(e){
+  if(hasStylusT(e.touches))return;
+  if(isNativeEl(e.target))return;
+  e.preventDefault();
+  // 指タップでパネルを閉じる（パネル外・UI外タップ）
+  if(ftouches.size===0){
+    // rpanel (右パネル)
+    if(openPanel){const rp=document.querySelector('.rpanel.open');if(rp&&!rp.contains(e.target)&&!document.getElementById('rpanel-group').contains(e.target)){closePanel();}}
+    // toppanel (上部パネル)
+    document.querySelectorAll('.toppanel.open').forEach(p=>{
+      const triggerId=p.id==='ref-panel'?'ref-btn':p.id==='sz-panel'?'sz-btn':p.id==='sv-panel'?'export-btn':null;
+      const trigger=triggerId?document.getElementById(triggerId):null;
+      if(!p.contains(e.target)&&(!trigger||!trigger.contains(e.target))){p.classList.remove('open');}
+    });
+  }
+  const prev=ftouches.size;
+  for(let i=0;i<e.changedTouches.length;i++){
+    const t=e.changedTouches[i];
+    if(isStylusT(t))continue;
+    ftouches.set(t.identifier,{x:t.clientX,y:t.clientY,sx:t.clientX,sy:t.clientY,t:Date.now()});
+  }
+  maxFC=Math.max(maxFC,ftouches.size);
+  if(prev===0&&ftouches.size>=1){fMoved=false;gStart=Date.now();}
+  rebuildNav();
+},{passive:false,capture:false});
+document.addEventListener('touchmove',function(e){
+  if(hasStylusT(e.touches))return;
+  if(isNativeEl(e.target))return;e.preventDefault();
+  for(let i=0;i<e.changedTouches.length;i++){
+    const t=e.changedTouches[i];
+    if(isStylusT(t))continue;
+    const p=ftouches.get(t.identifier);if(!p)continue;
+    if(Math.abs(t.clientX-p.sx)>6||Math.abs(t.clientY-p.sy)>6)fMoved=true;
+    ftouches.set(t.identifier,{...p,x:t.clientX,y:t.clientY});
+  }
+  const fp=[...ftouches.values()];
+  if(fp.length===1&&panBase){view.x=panBase.vx+(flipNavX(fp[0].x)-panBase.px);view.y=panBase.vy+(fp[0].y-panBase.py);applyView();}
+  else if(fp.length>=2&&pinchBase){
+    const[a,b]=fp;const lax=flipNavX(a.x),lbx=flipNavX(b.x);
+    const dist=Math.hypot(lbx-lax,b.y-a.y),mx=(lax+lbx)/2,my=(a.y+b.y)/2;
+    const angle=Math.atan2(b.y-a.y,lbx-lax);const dAngle=angle-pinchBase.angle;
+    const minS=Math.min(screenW/CW,screenH/CH)*0.1;const ns=Math.max(minS,Math.min(14,pinchBase.scale*dist/pinchBase.dist));const f=ns/pinchBase.scale;
+    const dx=pinchBase.vx+CW*pinchBase.scale/2-pinchBase.mx,dy=pinchBase.vy+CH*pinchBase.scale/2-pinchBase.my;
+    const cos=Math.cos(dAngle),sin=Math.sin(dAngle);const rx=dx*cos-dy*sin,ry=dx*sin+dy*cos;
+    const SNAP_DEG=5*Math.PI/180,SNAP_STEP=Math.PI/2;
+    let newRot=pinchBase.rot+dAngle;
+    const snapped=Math.round(newRot/SNAP_STEP)*SNAP_STEP;
+    if(Math.abs(newRot-snapped)<SNAP_DEG)newRot=snapped;
+    view.scale=ns;view.rot=newRot;view.x=mx+rx*f-CW*ns/2;view.y=my+ry*f-CH*ns/2;applyView();
+  }
+  if(selState==='transform')drawSelOv();
+},{passive:false,capture:false});
+document.addEventListener('touchend',function(e){
+  if(hasStylusT(e.touches))return;
+  for(let i=0;i<e.changedTouches.length;i++){
+    const t=e.changedTouches[i];if(isStylusT(t))continue;
+    ftouches.delete(t.identifier);
+  }
+  const fp=[...ftouches.values()];
+  if(!fp.length){
+    const el=Date.now()-gStart;if(!fMoved&&el<350){if(maxFC>=3)redo();else if(maxFC===2)undo();}
+    maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;saveState();
+  }else rebuildNav();
+},{passive:false,capture:false});
+document.addEventListener('touchcancel',function(e){
+  for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(!isStylusT(t))ftouches.delete(t.identifier);}
+  if(!ftouches.size){maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}
+},{passive:false,capture:false});
+// ── 左ボタン・パネル・スライダー ─────────────────────────
+function makeDraggableBtn(el,initY,onTap){
+  let BY=initY,PD=false,Mov=false,SY=0,BaseY=0;el.style.top=BY+'px';
+  el.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();PD=true;Mov=false;SY=e.changedTouches[0].clientY;BaseY=BY;},{passive:false});
+  el.addEventListener('touchmove',function(e){if(!PD)return;e.preventDefault();const dy=e.changedTouches[0].clientY-SY;if(Math.abs(dy)>6){Mov=true;BY=Math.max(38,Math.min(window.innerHeight-38,BaseY+dy));el.style.top=BY+'px';}},{passive:false});
+  el.addEventListener('touchend',function(e){if(!PD)return;e.preventDefault();e.stopPropagation();PD=false;if(!Mov)onTap();Mov=false;},{passive:false});
+  el.addEventListener('touchcancel',function(){PD=false;Mov=false;},{passive:false});
+}
+makeDraggableBtn(document.getElementById('flip-btn'),window.innerHeight*.35,()=>{flipState=!flipState;_rec({type:'flip',state:flipState});syncFlipBtn();applyView();showToast(flipState?'左右反転 ON':'反転解除');});
+const colorBtn=document.getElementById('color-btn');
+makeDraggableBtn(colorBtn,window.innerHeight*.80,()=>{inkTransparent=!inkTransparent;colorBtn.classList.toggle('on',inkTransparent);showToast(inkTransparent?'透明描画 ON':'通常色に戻しました');});
+const erb=document.getElementById('erb'),badge=document.getElementById('badge');
+makeDraggableBtn(erb,window.innerHeight*.50,()=>{if(erbMode==='toggle'){eraserOn=!eraserOn;erb.classList.toggle('on',eraserOn);badge.classList.toggle('show',eraserOn);showToast(eraserOn?'消しゴム ON':'ペン モード');}});
+erb.addEventListener('touchstart',e=>{if(erbMode==='hold'){eraserOn=true;erb.classList.add('on');badge.classList.add('show');}},{passive:true});
+erb.addEventListener('touchend',e=>{if(erbMode==='hold'){eraserOn=false;erb.classList.remove('on');badge.classList.remove('show');}},{passive:true});
+document.querySelectorAll('.mode-btn').forEach(btn=>{btn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();erbMode=btn.dataset.mode;document.querySelectorAll('.mode-btn').forEach(b=>b.classList.remove('sel'));btn.classList.add('sel');eraserOn=false;erb.classList.remove('on');badge.classList.remove('show');});});
+const selBtnEl=document.getElementById('sel-btn');
+makeDraggableBtn(selBtnEl,window.innerHeight*.65,()=>{if(selState===null){lassoPath=[];setSelState('lasso');}else if(selState==='lasso')execLasso();else if(selState==='transform')commitTransform();});
+selBtnEl.addEventListener('touchstart',e=>{selBtnEl._dwnT=Date.now();},{passive:true});
+selBtnEl.addEventListener('touchend',e=>{if(Date.now()-selBtnEl._dwnT>600){cancelSel();showToast('選択キャンセル');}},{passive:true});
+
+// 定規ボタン（3状態: 0=OFF, 1=直線, 2=スナップ直線H/V/45°）
+const rulerBtnEl=document.getElementById('ruler-btn');
+function syncRulerBtn(){
+  rulerBtnEl.classList.remove('active','snap');
+  const bl=rulerBtnEl.querySelector('.lbtn-lbl');
+  if(rulerMode===1){rulerBtnEl.classList.add('active');if(bl)bl.textContent='RULER';}
+  else if(rulerMode===2){rulerBtnEl.classList.add('active','snap');if(bl)bl.textContent='SNAP';}
+  else{if(bl)bl.textContent='RULER';}
+}
+makeDraggableBtn(rulerBtnEl,window.innerHeight*.75,()=>{
+  rulerMode=(rulerMode+1)%3;
+  rulerStart=null;rulerPreviewPt=null;
+  syncRulerBtn();drawSelOv();
+  const msg=['定規 OFF','定規 ON（直線）','定規 ON（H/V/45°スナップ）'][rulerMode];
+  showToast(msg);
+});
+
+// ── 背景色（カラーピッカー経由） ─────────────────────────
+const bgSwatch=document.getElementById('bg-swatch');
+function applyBg(hex){bgColor=hex;bgSwatch.style.background=hex;bgSwatch.style.border=hex.toLowerCase()==='#ffffff'?'1.5px solid #000':'none';bgRGB=hexToRGB01(hex);scheduleDraw();}
+applyBg('#ffffff');
+document.getElementById('bg-wrap').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();openColorPicker(bgColor,(col)=>{applyBg(col);_rec({type:'bg_color',color:col});});});
+document.getElementById('reset-view-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();resetView();});
+
+// ── 新規作成 ──────────────────────────────────────────────
+function doNewCanvas(){
+  gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];
+  timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
+  addGLLayer('レイヤー 1','#000000');fitView();setTimeout(captureNow,0);renderLayers();
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;showToast('新規キャンバス');
+}
+const newDialog=document.getElementById('new-dialog'),svPanel=document.getElementById('sv-panel');
+document.getElementById('new-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();newDialog.classList.add('show');});
+document.getElementById('nd-save-first').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();newDialog.classList.remove('show');svPanel.classList.add('open');svPanel._afterSave=()=>doNewCanvas();});
+document.getElementById('nd-discard').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();newDialog.classList.remove('show');doNewCanvas();});
+document.getElementById('nd-cancel').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();newDialog.classList.remove('show');});
+newDialog.addEventListener('pointerdown',e=>{if(e.target===newDialog)newDialog.classList.remove('show');});
+
+// ── タブドット ───────────────────────────────────────────
+const rpg=document.getElementById('rpanel-group'),tabDot=document.getElementById('tab-dot');
+let tdY=window.innerHeight*.35,tdPD=false,tdDSY=0,tdDBY=0;rpg.style.top=tdY+'px';
+tabDot.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();tdPD=true;tdDSY=e.changedTouches[0].clientY;tdDBY=tdY;},{passive:false});
+tabDot.addEventListener('touchmove',function(e){if(!tdPD)return;e.preventDefault();const dy=e.changedTouches[0].clientY-tdDSY;tdY=Math.max(10,Math.min(window.innerHeight-240,tdDBY+dy));rpg.style.top=tdY+'px';},{passive:false});
+tabDot.addEventListener('touchend',function(e){if(!tdPD)return;e.preventDefault();e.stopPropagation();tdPD=false;},{passive:false});
+tabDot.addEventListener('touchcancel',function(){tdPD=false;},{passive:false});
+
+// ── パネル開閉 ───────────────────────────────────────────
+const PANELS={brush:'br-panel',marker:'mk-panel',eraser:'er-panel',layers:'ly-panel'};
+const TABS={brush:'tab-br',marker:'tab-mk',eraser:'tab-er',layers:'tab-ly'};
+let _panelAutoCloseTimer=null;
+function openPanelFn(id){
+  clearTimeout(_panelAutoCloseTimer);if(openPanel===id){closePanel();return;}
+  closePanel(false);openPanel=id;
+  if(PANELS[id])document.getElementById(PANELS[id]).classList.add('open');
+  if(TABS[id])document.getElementById(TABS[id]).classList.add('act');
+  rpg.classList.add('shifted');
+  if(id==='brush'&&activeTool!=='pen')switchTool('pen');if(id==='marker'&&activeTool!=='marker')switchTool('marker');
+  if(id==='layers')requestAnimationFrame(()=>{if(penId===null)renderLayers();});
+}
+function closePanel(r=true){
+  clearTimeout(_panelAutoCloseTimer);Object.values(PANELS).forEach(p=>document.getElementById(p).classList.remove('open'));Object.values(TABS).forEach(t=>document.getElementById(t).classList.remove('act'));rpg.classList.remove('shifted');if(r)openPanel=null;
+}
+function schedulePanelAutoClose(){clearTimeout(_panelAutoCloseTimer);if(openPanel&&openPanel!=='layers'){_panelAutoCloseTimer=setTimeout(()=>{if(openPanel&&openPanel!=='layers')closePanel();},1200);}}
+Object.entries(TAB_MAP).forEach(([tabId,panelName])=>{if(!panelName)return;const el=document.getElementById(tabId);if(!el)return;el.addEventListener('pointerdown',function(e){if(e.pointerType==='pen')return;e.preventDefault();e.stopPropagation();openPanelFn(panelName);},{passive:false});});
+document.addEventListener('pointerdown',e=>{if(e.pointerType==='pen')return;const szp=document.getElementById('sz-panel'),svp=svPanel;if(!szp.contains(e.target)&&!document.getElementById('sz-btn').contains(e.target))szp.classList.remove('open');if(!svp.contains(e.target)&&!document.getElementById('export-btn').contains(e.target))svp.classList.remove('open');},{passive:true,capture:false});
+
+// ── タブ→スロット ドラッグ ───────────────────────────────
+(function setupTabDrag(){
+  const dragSources=[{tabId:'tab-br',getType:()=>'pen'},{tabId:'tab-mk',getType:()=>'marker'},{tabId:'tab-er',getType:()=>'eraser'}];
+  let _dragging=false,_dragType=null;
+  function slotAtPoint(x,y){const el=document.elementFromPoint(x,y);if(!el)return null;const slot=el.closest('.sp-slot');return slot?+slot.dataset.slot:null;}
+  function clearDragOver(){document.querySelectorAll('.sp-slot.drag-over').forEach(s=>s.classList.remove('drag-over'));}
+  dragSources.forEach(({tabId,getType})=>{
+    const tab=document.getElementById(tabId);if(!tab)return;let _sx=0,_sy=0,_id=-1;
+    tab.addEventListener('touchstart',e=>{const t=e.changedTouches[0];_dragging=false;_dragType=null;_sx=t.clientX;_sy=t.clientY;_id=t.identifier;},{passive:true});
+    tab.addEventListener('touchmove',e=>{const t=[...e.changedTouches].find(c=>c.identifier===_id);if(!t)return;if(!_dragging){if(Math.abs(t.clientX-_sx)>8||Math.abs(t.clientY-_sy)>8){_dragging=true;_dragType=getType();if(openPanel)closePanel();if(penId!==null){finishStroke();penId=null;}}}if(_dragging){e.stopPropagation();clearDragOver();const idx=slotAtPoint(t.clientX,t.clientY);if(idx!==null){const slot=document.querySelector(`.sp-slot[data-slot="${idx}"]`);if(slot)slot.classList.add('drag-over');}}},{passive:true});
+    tab.addEventListener('touchend',e=>{if(_dragging&&_dragType){clearDragOver();const t=e.changedTouches[0];const idx=slotAtPoint(t.clientX,t.clientY);if(idx!==null){const prevTool=activeTool,prevEraser=eraserOn;if(_dragType==='eraser'){eraserOn=true;}else{eraserOn=false;if(activeTool!==_dragType)switchTool(_dragType);}spSaveCurrentTool(idx);eraserOn=prevEraser;if(activeTool!==prevTool)switchTool(prevTool);}_dragging=false;_dragType=null;}},{passive:true});
+  });
+})();
+
+// ── カスタムスライダー ─────────────────────────────────
+function initCsl(id,init,cb){
+  const el=document.getElementById(id);if(!el)return;
+  const min=+(el.dataset.min||0),max=+(el.dataset.max||100),ratio=+(el.dataset.ratio||5);
+  let val=Math.max(min,Math.min(max,init|0)),pd=false,sx=0,sv=0;
+  el.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
+  const fill=el.querySelector('.csl-fill'),knob=el.querySelector('.csl-knob');
+  function render(){const p=(val-min)/(max-min)*100;fill.style.width=p+'%';knob.style.left=p+'%';}
+  function apply(v){val=Math.max(min,Math.min(max,Math.round(v)));render();cb(val);}
+  el.addEventListener('pointerdown',function(e){e.preventDefault();e.stopPropagation();el.setPointerCapture(e.pointerId);pd=true;sx=e.clientX;sv=val;},{passive:false});
+  el.addEventListener('pointermove',function(e){if(!pd)return;e.preventDefault();apply(sv+(e.clientX-sx)/ratio);},{passive:false});
+  el.addEventListener('pointerup',()=>pd=false,{passive:false});el.addEventListener('pointercancel',()=>pd=false,{passive:false});render();
+}
+
+// ── レイヤーリスト（レイヤー名編集 #3, カラーピッカー #11, レイヤー操作undo #7） ──
+function renderLayers(){
+  const list=document.getElementById('llist');list.innerHTML='';
+  [...gLayers].reverse().forEach((layer,ri)=>{
+    const i=gLayers.length-1-ri;
+    const item=document.createElement('div');item.className='li'+(i===gActiveIdx?' act':'');
+    const arrows=document.createElement('div');arrows.className='larrows';
+    const upBtn=document.createElement('div');upBtn.className='larr';upBtn.textContent='↑';upBtn.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();moveLayer(i,i+1);});
+    const dnBtn=document.createElement('div');dnBtn.className='larr';dnBtn.textContent='↓';dnBtn.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();moveLayer(i,i-1);});
+    arrows.appendChild(upBtn);arrows.appendChild(dnBtn);
+    const tw=document.createElement('div');tw.className='lthumb';const tc=document.createElement('canvas');tc.id='th-'+layer.id;tc.width=TSIZE;tc.height=TSIZE;tw.appendChild(tc);
+    function activateLayer(){if(gActiveIdx===i)return;gActiveIdx=i;document.querySelectorAll('#llist .li').forEach(el=>el.classList.remove('act'));item.classList.add('act');scheduleDraw();}
+    tw.addEventListener('pointerdown',e=>{e.stopPropagation();activateLayer();});
+    item.addEventListener('pointerdown',e=>{if(e.target===item||e.target===nmDiv||e.target===tc||e.target===tw)activateLayer();});
+    const info=document.createElement('div');info.className='linfo';
+    // レイヤー名（#3: ダブルタップで編集）
+    const nmWrap=document.createElement('div');nmWrap.className='lname-wrap';
+    const nmDiv=document.createElement('div');nmDiv.className='lname';nmDiv.textContent=layer.name;
+    const nmInput=document.createElement('input');nmInput.className='lname-input';nmInput.value=layer.name;nmInput.type='text';nmInput.maxLength=32;
+    let nmTapT=0;
+    nmDiv.addEventListener('pointerdown',e=>{
+      e.stopPropagation();const now=Date.now();
+      if(now-nmTapT<400){nmDiv.style.display='none';nmInput.style.display='block';nmInput.focus();nmInput.select();}
+      nmTapT=now;
+    });
+    nmInput.addEventListener('change',()=>{layer.name=nmInput.value||layer.name;nmDiv.textContent=layer.name;nmInput.style.display='none';nmDiv.style.display='';_rec({type:'layer_prop',layerId:layer.id,name:layer.name});});
+    nmInput.addEventListener('blur',()=>{layer.name=nmInput.value||layer.name;nmDiv.textContent=layer.name;nmInput.style.display='none';nmDiv.style.display='';_rec({type:'layer_prop',layerId:layer.id,name:layer.name});});
+    nmInput.addEventListener('keydown',e=>{if(e.key==='Enter'){nmInput.blur();}if(e.key==='Escape'){nmInput.value=layer.name;nmInput.blur();}});
+    nmWrap.appendChild(nmDiv);nmWrap.appendChild(nmInput);
+    info.appendChild(nmWrap);
+    // ブレンドモード
+    const BLENDS=[{k:'normal',l:'通常'},{k:'multiply',l:'乗算'},{k:'overlay',l:'オーバーレイ'}];
+    const bmodes=document.createElement('div');bmodes.className='lbmodes';BLENDS.forEach(({k,l})=>{const b=document.createElement('div');b.className='lbm'+(layer.blend===k?' act':'');b.textContent=l;b.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();layer.blend=k;_rec({type:'layer_prop',layerId:layer.id,blend:k});bmodes.querySelectorAll('.lbm').forEach(x=>x.classList.remove('act'));b.classList.add('act');scheduleDraw();});bmodes.appendChild(b);});
+    // レイヤーカラー
+    const hexCol=rgb01ToHex(layer.color);const cd=document.createElement('div');cd.className='lcd';const sw2=document.createElement('div');sw2.className='lcd-sw';sw2.style.background=hexCol;cd.appendChild(sw2);
+    cd.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();openColorPicker(rgb01ToHex(layer.color),(col)=>{sw2.style.background=col;recolorLayer(layer,col);});});
+    const vb=document.createElement('div');vb.className='leye'+(layer.visible?'':' hidden');vb.textContent=layer.visible?'◎':'◯';vb.addEventListener('pointerdown',e=>{e.stopPropagation();layer.visible=!layer.visible;_rec({type:'layer_prop',layerId:layer.id,visible:layer.visible});vb.textContent=layer.visible?'◎':'◯';vb.classList.toggle('hidden',!layer.visible);scheduleDraw();});
+    const db=document.createElement('div');db.className='ldel';db.textContent='✕';db.addEventListener('pointerdown',e=>{
+      e.stopPropagation();if(gLayers.length<=1){showToast('レイヤーは最低1枚');return;}
+      setTimeout(async()=>{
+        const _did=gLayers[i].id;
+        gl.deleteTexture(gLayers[i].tex);gl.deleteFramebuffer(gLayers[i].fbo);gLayers.splice(i,1);
+        gActiveIdx=Math.min(gActiveIdx,gLayers.length-1);
+        _rec({type:'layer_delete',layerId:_did});
+        scheduleDraw();renderLayers();showToast('レイヤーを削除');
+      },0);
+    });
+    // 上段: arrows + thumb + info(name) + bmodes + color + eye + del
+    item.appendChild(arrows);item.appendChild(tw);item.appendChild(info);item.appendChild(bmodes);item.appendChild(cd);item.appendChild(vb);item.appendChild(db);
+    // 下段: 不透明度スライダー（独立した行、サムネイルと重ならない）
+    const opRow=document.createElement('div');opRow.style.cssText='display:flex;align-items:center;gap:6px;padding:0 5px 5px;width:100%;box-sizing:border-box';
+    const opLbl=document.createElement('span');opLbl.textContent='不透明度';opLbl.style.cssText='font-size:9px;color:var(--tx2);white-space:nowrap;flex-shrink:0';
+    const ocsl=document.createElement('div');ocsl.className='csl';ocsl.style.cssText='flex:1;height:28px;position:relative;touch-action:none;cursor:ew-resize';
+    const oval=document.createElement('span');oval.textContent=Math.round(layer.opacity*100)+'%';oval.style.cssText='font-size:9px;color:var(--tx2);min-width:28px;text-align:right;flex-shrink:0;font-family:"DM Mono",monospace';
+    opRow.appendChild(opLbl);opRow.appendChild(ocsl);opRow.appendChild(oval);
+    list.appendChild(item);list.appendChild(opRow);
+    (function(el2,lay){
+      const mn=0,mx=100,rt=3;let val2=Math.round(lay.opacity*100),pd=false,sx=0,sv=0,touchId2=-1;
+      el2.innerHTML='<div class="csl-bg"><div class="csl-fill"></div></div><div class="csl-knob"></div>';
+      const f2=el2.querySelector('.csl-fill'),k2=el2.querySelector('.csl-knob');
+      function r2(){const p=(val2-mn)/(mx-mn)*100;f2.style.width=p+'%';k2.style.left=p+'%';}
+      function a2(v){val2=Math.max(mn,Math.min(mx,Math.round(v)));r2();lay.opacity=val2/100;oval.textContent=val2+'%';scheduleDraw();}
+      el2.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();const t=e.changedTouches[0];touchId2=t.identifier;pd=true;sx=t.clientX;sv=val2;},{passive:false});
+      el2.addEventListener('touchmove',function(e){e.preventDefault();e.stopPropagation();if(!pd)return;const t=[...e.changedTouches].find(c=>c.identifier===touchId2);if(!t)return;a2(sv+(t.clientX-sx)/rt);},{passive:false});
+      el2.addEventListener('touchend',function(){if(pd)_rec({type:'layer_prop',layerId:lay.id,opacity:lay.opacity});pd=false;touchId2=-1;},{passive:true});
+      el2.addEventListener('touchcancel',function(){pd=false;touchId2=-1;},{passive:true});r2();
+    })(ocsl,layer);
+  });
+  if(openPanel==='layers')debouncedUpdateThumbs();
+}
+// レイヤー追加（#7: undoに記録）
+document.getElementById('btn-addlayer').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  if(gLayers.length>=12){showToast('レイヤーは最大12枚まで');return;}
+  const _nl=addGLLayer('レイヤー '+(gLayers.length+1),'#000000');
+  _rec({type:'layer_add',id:_nl.id,name:_nl.name,color:[..._nl.color],opacity:_nl.opacity,visible:_nl.visible,blend:_nl.blend,layerName:_nl.name});
+  renderLayers();scheduleDraw();showToast('レイヤーを追加');
+});
+
+// サイズ変更
+const szBtn=document.getElementById('sz-btn'),szPanel=document.getElementById('sz-panel'),szConfirm=document.getElementById('sz-confirm');
+szBtn.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();szPanel.classList.toggle('open');szConfirm.style.display='none';pendingSize=null;});
+document.querySelectorAll('.sz-opt').forEach(opt=>{opt.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();const w=+opt.dataset.w,h=+opt.dataset.h;if(w===CW&&h===CH){showToast('現在と同じサイズです');return;}pendingSize={w,h};document.querySelectorAll('.sz-opt').forEach(o=>o.classList.remove('cur'));opt.classList.add('cur');szConfirm.style.display='block';});});
+szConfirm.addEventListener('pointerdown',async e=>{
+  e.preventDefault();e.stopPropagation();if(!pendingSize)return;
+  const oldCW=CW,oldCH=CH,{w,h}=pendingSize;showToast('変換中…');
+  const scaledLayers=[];
+  for(const l of gLayers){
+    const r8old=new Uint8Array(oldCW*oldCH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,oldCW,oldCH,gl.RED,gl.UNSIGNED_BYTE,r8old);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const srcC=_mkC(oldCW,oldCH);const srcCtx=srcC.getContext('2d');
+    const rgba=new Uint8ClampedArray(oldCW*oldCH*4);
+    for(let row=0;row<oldCH;row++){const fr=oldCH-1-row;for(let col=0;col<oldCW;col++){const v=r8old[fr*oldCW+col];const oi=(row*oldCW+col)*4;rgba[oi]=v;rgba[oi+1]=v;rgba[oi+2]=v;rgba[oi+3]=v;}}
+    srcCtx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer),oldCW,oldCH),0,0);
+    const dstC=_mkC(w,h);const dstCtx=dstC.getContext('2d');
+    dstCtx.imageSmoothingEnabled=false;dstCtx.drawImage(srcC,0,0,w,h);
+    const di=dstCtx.getImageData(0,0,w,h);const r8new=new Uint8Array(w*h);
+    for(let row=0;row<h;row++){const fr=h-1-row;for(let col=0;col<w;col++)r8new[fr*w+col]=di.data[(row*w+col)*4+3]>127?255:0;}
+    scaledLayers.push({ref:l,r8new});await new Promise(r=>setTimeout(r,0));
+  }
+  CW=w;CH=h;timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
+  for(const{ref,r8new}of scaledLayers){const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(ref.tex);gl.deleteFramebuffer(ref.fbo);ref.tex=nt;ref.fbo=nf;}
+  resetView();renderLayers();
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');
+  setTimeout(()=>{lastCaptureTime=0;captureNow('canvas_resize');showToast(`${CW}×${CH} に変換完了`);},0);
+});
+
+let ttmr;
+function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(ttmr);ttmr=setTimeout(()=>t.classList.remove('show'),1800);}
+function updRF(el){el.style.setProperty('--pct',((el.value-el.min)/(el.max-el.min)*100).toFixed(1)+'%');}
+// ── ファイルI/O ───────────────────────────────────────────
+function reiwaFn(){const n=new Date(),pad=v=>String(v).padStart(2,'0');return pad(n.getFullYear()-2018)+pad(n.getMonth()+1)+pad(n.getDate())+pad(n.getHours())+pad(n.getMinutes())+pad(n.getSeconds());}
+function getOutFn(inputId,fallback){const el=document.getElementById(inputId);return(el&&el.value.trim())||fallback||reiwaFn();}
+
+// ── 統合ファイル読み込み（PNG/JPEG/GIF/PSD/BPF 全対応） ───
+document.getElementById('file-input').addEventListener('change',function(){
+  const file=this.files[0];if(!file)return;this.value='';
+  const name=file.name.toLowerCase();
+  if(name.endsWith('.psd')){loadPSDFile(file);return;}
+  if(name.endsWith('.bpf')){loadBPFFile(file);return;}
+  // 画像ファイル（PNG/JPEG/GIF等）→ 輝度閾値で2値化して読み込み
+  const reader=new FileReader();
+  reader.onload=ev=>{const img=new Image();img.onload=()=>{
+    const l=gLayers[gActiveIdx];if(!l)return;
+    const scale=Math.min(CW/img.width,CH/img.height),sw=Math.round(img.width*scale),sh=Math.round(img.height*scale),ox=Math.round((CW-sw)/2),oy=Math.round((CH-sh)/2);
+    const tc=_mkC(CW,CH);const tctx=tc.getContext('2d');
+    tctx.fillStyle='#ffffff';tctx.fillRect(0,0,CW,CH);
+    tctx.drawImage(img,ox,oy,sw,sh);
+    const id=tctx.getImageData(0,0,CW,CH);const r8=new Uint8Array(CW*CH);
+    for(let row=0;row<CH;row++){const fboRow=CH-1-row;for(let col=0;col<CW;col++){
+      const px=(row*CW+col)*4;
+      const r=id.data[px],g=id.data[px+1],b=id.data[px+2],a=id.data[px+3];
+      const lum=a<128?255:(0.299*r+0.587*g+0.114*b);
+      r8[fboRow*CW+col]=lum<128?255:0;
+    }}
+    gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+    scheduleDraw();setTimeout(captureNow,0);showToast('画像を読み込みました');
+  };img.src=ev.target.result;};reader.readAsDataURL(file);
+});
+
+// ── PNG書き出し（全レイヤー統合・背景色適用） ─────────────
+document.getElementById('export-btn').addEventListener('pointerdown',e=>{
+  e.preventDefault();e.stopPropagation();
+  const isOpen=svPanel.classList.contains('open');
+  svPanel.classList.toggle('open',!isOpen);
+  const fn=reiwaFn();document.getElementById('sv-fn').placeholder=fn;document.getElementById('sv-psd-fn').placeholder=fn;
+});
+document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
+  e.preventDefault();e.stopPropagation();svPanel.classList.remove('open');showToast('PNG書き出し中…');
+  // 全レイヤーをCanvas2Dで合成
+  const outC=_mkC(CW,CH);const outCtx=outC.getContext('2d');
+  // 背景色を塗る
+  outCtx.fillStyle=bgColor;outCtx.fillRect(0,0,CW,CH);
+  // 各レイヤーをボトムアップで合成
+  for(const l of gLayers){
+    if(!l.visible)continue;
+    const r8=new Uint8Array(CW*CH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const rgba=new Uint8ClampedArray(CW*CH*4);
+    const[ir,ig,ib]=[Math.round(l.color[0]*255),Math.round(l.color[1]*255),Math.round(l.color[2]*255)];
+    for(let row=0;row<CH;row++){const srcRow=CH-1-row;for(let col=0;col<CW;col++){
+      const on=r8[srcRow*CW+col]>127;const oi=(row*CW+col)*4;
+      rgba[oi]=on?ir:0;rgba[oi+1]=on?ig:0;rgba[oi+2]=on?ib:0;rgba[oi+3]=on?Math.round(l.opacity*255):0;
+    }}
+    const lc=_mkC(CW,CH);const lctx=lc.getContext('2d');
+    lctx.putImageData(new ImageData(rgba,CW,CH),0,0);
+    outCtx.globalAlpha=1;
+    outCtx.globalCompositeOperation={normal:'source-over',multiply:'multiply',overlay:'overlay'}[l.blend]||'source-over';
+    outCtx.drawImage(lc,0,0);
+    await new Promise(r=>setTimeout(r,0));
+  }
+  outCtx.globalAlpha=1;outCtx.globalCompositeOperation='source-over';
+  const fn=getOutFn('sv-fn',reiwaFn());
+  if(typeof outC.convertToBlob==='function'){
+    outC.convertToBlob({type:'image/png'}).then(blob=>{const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=fn+'.png';document.body.appendChild(a);a.click();document.body.removeChild(a);setTimeout(()=>URL.revokeObjectURL(url),3000);showToast('PNG書き出し完了');});
+  }else{const a=document.createElement('a');a.href=outC.toDataURL('image/png');a.download=fn+'.png';document.body.appendChild(a);a.click();document.body.removeChild(a);showToast('PNG書き出し完了');}
+  if(svPanel._afterSave){const cb=svPanel._afterSave;svPanel._afterSave=null;setTimeout(cb,400);}
+});
+
+// ── 独自形式 BPF 保存（#2, #8） ──────────────────────────
+// bpf-save-btn handled in init
+
+
+// ── BPF 読み込み ──────────────────────────────────────────
+function loadBPFFile(file){
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    try{
+      const payload=JSON.parse(ev.target.result);const{meta,pngs}=payload;
+      if(meta.version!==1)throw new Error('バージョン不一致');
+      // キャンバスサイズ変更
+      if(meta.CW&&meta.CH&&(meta.CW!==CW||meta.CH!==CH)){
+        gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
+        CW=meta.CW;CH=meta.CH;document.getElementById('sz-cur').textContent=CW+'×'+CH;document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
+      }else{gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;}
+      if(meta.bgColor)applyBg(meta.bgColor);
+      for(let i=0;i<meta.layers.length;i++){
+        const lm=meta.layers[i];const pngB64=pngs[lm.pngIdx];
+        await new Promise(resolve=>{
+          const img=new Image();img.onload=()=>{
+            const tc=_mkC(CW,CH);const tctx=tc.getContext('2d');tctx.drawImage(img,0,0);
+            const id=tctx.getImageData(0,0,CW,CH);const r8=new Uint8Array(CW*CH);
+            for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++)r8[fr*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
+            const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
+            gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+            gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+            gLayers.push({id:lm.id||(Date.now()*1000+i),name:lm.name||('Layer '+(i+1)),color:lm.color||[0,0,0],opacity:lm.opacity??1,visible:lm.visible??true,blend:lm.blend||'normal',tex,fbo});
+            resolve();
+          };img.src='data:image/png;base64,'+pngB64;
+        });
+      }
+      gActiveIdx=Math.min(meta.activeIdx||0,gLayers.length-1);
+      fitView();renderLayers();scheduleDraw();setTimeout(captureNow,0);showToast('BPF読み込み完了');
+    }catch(err){showToast('BPF読み込み失敗: '+err.message);console.error(err);}
+  };reader.readAsText(file);
+}
+// BPF開くボタン（削除 - 統合ファイルダイアログで処理）
+// 画像で開く（既存のfile-input）はそのまま
+
+// ── PSD出力（#4: ファイル名入力） ────────────────────────
+document.getElementById('sv-psd').addEventListener('pointerdown',async e=>{
+  e.preventDefault();e.stopPropagation();svPanel.classList.remove('open');showToast('PSD生成中…');
+  await new Promise(r=>setTimeout(r,60));
+  try{
+    const layersData=[];
+    for(const l of gLayers){
+      const r8=new Uint8Array(CW*CH);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      layersData.push({r8,color:l.color,opacity:l.opacity,name:l.name,blend:l.blend,visible:l.visible});
+      await new Promise(r=>setTimeout(r,0));
+    }
+    const psd=buildPSD(layersData);
+    const blob=new Blob([psd],{type:'application/octet-stream'});const url=URL.createObjectURL(blob);
+    const fn=getOutFn('sv-psd-fn',reiwaFn());
+    const a=document.createElement('a');a.href=url;a.download=fn+'.psd';document.body.appendChild(a);a.click();document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url),3000);showToast('PSD出力完了');
+  }catch(err){showToast('PSD失敗: '+err.message);}
+});
+
+// ── PSD読み込み ───────────────────────────────────────────
+function loadPSDFile(file){
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const buf=ev.target.result;const v=new DataView(buf);let p=0;
+      const r8=()=>v.getUint8(p++);const r16=()=>{const n=v.getUint16(p,false);p+=2;return n;};const r16s=()=>{const n=v.getInt16(p,false);p+=2;return n;};const r32=()=>{const n=v.getUint32(p,false);p+=4;return n;};const rStr=n=>{let s='';for(let i=0;i<n;i++)s+=String.fromCharCode(r8());return s;};const skip=n=>{p+=n;};
+      const sig=rStr(4);if(sig!=='8BPS')throw new Error('PSDではありません');const ver=r16();if(ver!==1)throw new Error('PSB非対応');
+      skip(6);r16();const H=r32(),W=r32();r16();const colorMode=r16();if(colorMode!==3)throw new Error('RGB以外非対応');
+      skip(r32());skip(r32());const lmiLen=r32();const lmiEnd=p+lmiLen;r32();const layerCount=Math.abs(r16s());if(layerCount===0||layerCount>32)throw new Error('レイヤー数不正');
+      const records=[];
+      for(let li=0;li<layerCount;li++){r32();r32();r32();r32();const nc=r16();const chanInfo=[];for(let c=0;c<nc;c++){const id=r16s();const len=r32();chanInfo.push({id,len});}rStr(4);const blendKey=rStr(4);const opacity=r8()/255;r8();const flags=r8();r8();const visible=!(flags&2);const extraLen=r32();const extraEnd=p+extraLen;skip(4);skip(4);const nameLen=r8();let name='';for(let i=0;i<nameLen;i++)name+=String.fromCharCode(r8());skip((4-(1+nameLen)%4)%4);p=extraEnd;records.push({nc,chanInfo,opacity,visible,name:name||('Layer '+(li+1)),blendMode:blendKey.trim()==='mul'?'multiply':'normal'});}
+      const layerPixels=records.map(rec=>{const chans={};for(const ci of rec.chanInfo){const comp=r16();const nPix=W*H;let data;if(comp===0){data=new Uint8Array(buf,p,nPix);p+=nPix;}else if(comp===1){const rowLens=[];for(let r2=0;r2<H;r2++)rowLens.push(r16());data=new Uint8Array(nPix);let di=0;for(let r2=0;r2<H;r2++){const end=p+rowLens[r2];while(p<end){const hdr=v.getInt8(p++);if(hdr>=0){const nn=hdr+1;for(let i=0;i<nn;i++)data[di++]=r8();}else{const nn=1-hdr;const val2=r8();for(let i=0;i<nn;i++)data[di++]=val2;}}}}else throw new Error('非対応圧縮');chans[ci.id]=data;}return chans;});
+      p=lmiEnd;
+      if(W!==CW||H!==CH){gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;CW=W;CH=H;document.getElementById('sz-cur').textContent=CW+'×'+CH;document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));}
+      else{gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;}
+      records.forEach((rec,li)=>{
+        const chans=layerPixels[li];const alpha=chans[-1],R=chans[0],G=chans[1],B=chans[2];
+        let ir=0,ig=0,ib=0;if(R&&G&&B){for(let i=0;i<(alpha?alpha.length:0);i++){if(alpha[i]>127){ir=R[i];ig=G[i];ib=B[i];break;}}}
+        const hexColor='#'+(ir.toString(16).padStart(2,'0'))+(ig.toString(16).padStart(2,'0'))+(ib.toString(16).padStart(2,'0'));
+        const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
+        gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+        if(alpha){const r8=new Uint8Array(CW*CH);for(let i=0;i<alpha.length;i++)r8[i]=alpha[i]>127?255:0;gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);}
+        gLayers.push({id:(Date.now()*1000+Math.random()*999)|0,name:rec.name,color:hexToRGB01(hexColor),opacity:rec.opacity,visible:rec.visible,blend:rec.blendMode,tex,fbo});
+      });
+      gActiveIdx=0;fitView();renderLayers();scheduleDraw();setTimeout(captureNow,0);showToast('PSD読み込み完了 ('+records.length+'レイヤー)');
+    }catch(err){showToast('PSD読み込み失敗: '+err.message);console.error(err);}
+  };reader.readAsArrayBuffer(file);
+}
+
+// ── PSDビルダー ───────────────────────────────────────────
+function buildPSD(layersData){
+  const W=CW,H=CH,NL=layersData.length;
+  const blk=b=>b==='multiply'?'mul ':'norm';
+  function pstr(s){s=(s||'').slice(0,255);const b=[s.length];for(let i=0;i<s.length;i++)b.push(s.charCodeAt(i)&0xFF);while(b.length%4)b.push(0);return b;}
+  const lpix=layersData.map(ld=>{
+    const ir=Math.round(ld.color[0]*255),ig=Math.round(ld.color[1]*255),ib=Math.round(ld.color[2]*255);
+    const n=W*H;const a=new Uint8Array(n),r=new Uint8Array(n),g=new Uint8Array(n),b=new Uint8Array(n);
+    for(let row=0;row<H;row++){const src=H-1-row;for(let col=0;col<W;col++){const i=row*W+col,ink=ld.r8[src*W+col];a[i]=ink;if(ink){r[i]=ir;g[i]=ig;b[i]=ib;}}}
+    return[a,r,g,b];
+  });
+  const n=W*H;const[bgr,bgg,bgb]=hexToRGBint(bgColor);
+  const mR=new Uint8Array(n).fill(bgr),mG=new Uint8Array(n).fill(bgg),mB=new Uint8Array(n).fill(bgb);
+  layersData.forEach((ld,li)=>{if(!ld.visible)return;const op=ld.opacity;const[al,rc,gc,bc]=lpix[li];for(let i=0;i<n;i++){const aa=(al[i]/255)*op;if(!aa)continue;mR[i]=mR[i]*(1-aa)+rc[i]*aa|0;mG[i]=mG[i]*(1-aa)+gc[i]*aa|0;mB[i]=mB[i]*(1-aa)+bc[i]*aa|0;}});
+  const chanLen=2+n;const pnames=layersData.map(ld=>pstr(ld.name));
+  const totalRec=pnames.reduce((s,pn)=>s+66+pn.length,0);const liBodyLen=2+totalRec+NL*4*chanLen;
+  const liPad=liBodyLen+(liBodyLen&1);const lmiLen=4+liPad+4;const totalSize=26+4+4+4+lmiLen+2+3*n;
+  const out=new Uint8Array(totalSize);let p=0;
+  const w8=v=>out[p++]=v&0xFF;const w16=v=>{w8(v>>8);w8(v);};const w16s=v=>w16(v<0?v+0x10000:v);
+  const w32=v=>{w8(v>>>24);w8(v>>>16&255);w8(v>>>8&255);w8(v&255);};
+  const ws=s=>{for(let i=0;i<s.length;i++)w8(s.charCodeAt(i));};const wb=a=>{out.set(a,p);p+=a.length;};
+  ws('8BPS');w16(1);p+=6;w16(3);w32(H);w32(W);w16(8);w16(3);w32(0);w32(0);w32(lmiLen);w32(liPad);w16s(NL);
+  layersData.forEach((ld,li)=>{w32(0);w32(0);w32(H);w32(W);w16(4);w16s(-1);w32(chanLen);w16(0);w32(chanLen);w16(1);w32(chanLen);w16(2);w32(chanLen);ws('8BIM');ws(blk(ld.blend));w8(Math.round(ld.opacity*255));w8(0);w8(ld.visible?0:2);w8(0);const pn=pnames[li];w32(8+pn.length);w32(0);w32(0);wb(pn);});
+  layersData.forEach((_,li)=>{lpix[li].forEach(ch=>{w16(0);wb(ch);});});
+  if(liBodyLen&1)w8(0);w32(0);w16(0);wb(mR);wb(mG);wb(mB);
+  if(p!==totalSize)throw new Error(`PSD size error: ${p} vs ${totalSize}`);return out;
+}
+// ── カラーホイールピッカー ────────────────────────────────
+// 外リング=Hue、内側正方形=Saturation(x)×Value(y) 正しいHSV実装
+let _cpCallback=null,_cpHue=0,_cpSat=0,_cpVal=1;
+const cpModal=document.getElementById('cpicker-modal');
+const cpWheel=document.getElementById('cpicker-wheel');
+const cpPreview=document.getElementById('cpicker-preview');
+const cpHexIn=document.getElementById('cpicker-hex');
+
+// HSVRGB変換
+function hsvToRgb(h,s,v){const f=(n,k=(n+h/60)%6)=>v-v*s*Math.max(Math.min(k,4-k,1),0);return[f(5),f(3),f(1)];}
+function rgbToHsv(r,g,b){const mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0,s=mx?d/mx:0,v=mx;if(d){if(mx===r)h=((g-b)/d)%6;else if(mx===g)h=(b-r)/d+2;else h=(r-g)/d+4;h=h/6;if(h<0)h+=1;}return[h*360,s,v];}
+function hexToRgb01(hex){return[parseInt(hex.slice(1,3),16)/255,parseInt(hex.slice(3,5),16)/255,parseInt(hex.slice(5,7),16)/255];}
+function rgb01ToHex2(r,g,b){return'#'+(Math.round(r*255).toString(16).padStart(2,'0'))+(Math.round(g*255).toString(16).padStart(2,'0'))+(Math.round(b*255).toString(16).padStart(2,'0'));}
+
+// ホイール描画
+function cpDrawWheel(){
+  const W=cpWheel.width,H=cpWheel.height,ctx=cpWheel.getContext('2d');
+  ctx.clearRect(0,0,W,H);
+  const cx=W/2,cy=H/2;
+  // リング寸法: 外半径R、内半径rIn（隙間を広めに）
+  const R=Math.min(W,H)/2-3;
+  const RING_W=R*0.22; // リング幅
+  const rIn=R-RING_W;
+  const rInner=rIn-6; // 内側正方形の外接円半径（隙間6px）
+
+  // 外リング: Hue（360分割）
+  for(let a=0;a<360;a++){
+    const rad=a*Math.PI/180,rad2=(a+2)*Math.PI/180;
+    const[r,g,b]=hsvToRgb(a,1,1);
+    ctx.beginPath();ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,R,rad,rad2);ctx.arc(cx,cy,rIn,rad2,rad,true);
+    ctx.closePath();ctx.fillStyle=`rgb(${Math.round(r*255)},${Math.round(g*255)},${Math.round(b*255)})`;ctx.fill();
+  }
+
+  // 内側正方形: S(x軸 左=0右=1) × V(y軸 上=1下=0)
+  // 正方形は内接円より少し小さく
+  const sq=rInner*Math.SQRT2*0.88; // 内接正方形の辺長
+  const sqX=cx-sq/2,sqY=cy-sq/2;
+  // S方向グラデ（白→純色）
+  const[hr,hg,hb]=hsvToRgb(_cpHue,1,1);
+  const gradH=ctx.createLinearGradient(sqX,0,sqX+sq,0);
+  gradH.addColorStop(0,'#ffffff');gradH.addColorStop(1,`rgb(${Math.round(hr*255)},${Math.round(hg*255)},${Math.round(hb*255)})`);
+  ctx.fillStyle=gradH;ctx.fillRect(sqX,sqY,sq,sq);
+  // V方向グラデ（下=黒、上=透明）→ 正しい: 上=明るい、下=黒
+  const gradV=ctx.createLinearGradient(0,sqY,0,sqY+sq);
+  gradV.addColorStop(0,'rgba(0,0,0,0)');gradV.addColorStop(1,'rgba(0,0,0,1)');
+  ctx.fillStyle=gradV;ctx.fillRect(sqX,sqY,sq,sq);
+
+  // Hueハンドル（リング上）
+  const hAngle=_cpHue*Math.PI/180;
+  const rMid=rIn+RING_W/2;
+  const hx=cx+Math.cos(hAngle)*rMid,hy=cy+Math.sin(hAngle)*rMid;
+  ctx.beginPath();ctx.arc(hx,hy,8,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(hx,hy,8,0,Math.PI*2);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.stroke();
+
+  // SVハンドル（正方形内）
+  const sx=sqX+_cpSat*sq,sy=sqY+(1-_cpVal)*sq;
+  ctx.beginPath();ctx.arc(sx,sy,7,0,Math.PI*2);ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+  ctx.beginPath();ctx.arc(sx,sy,7,0,Math.PI*2);ctx.strokeStyle='#333';ctx.lineWidth=1;ctx.stroke();
+
+  // _sq をグローバルで保持（ピック時に使用）
+  cpWheel._sq={sqX,sqY,sq,R,rIn,cx,cy};
+}
+
+function cpUpdatePreview(){
+  const[r,g,b]=hsvToRgb(_cpHue,_cpSat,_cpVal);
+  const hex=rgb01ToHex2(r,g,b);cpPreview.style.background=hex;cpHexIn.value=hex;
+}
+
+function cpPickWheel(ex,ey){
+  const rect=cpWheel.getBoundingClientRect();
+  const scaleX=cpWheel.width/rect.width,scaleY=cpWheel.height/rect.height;
+  const px=(ex-rect.left)*scaleX,py=(ey-rect.top)*scaleY;
+  const d=cpWheel._sq;if(!d)return;
+  const{sqX,sqY,sq,R,rIn,cx,cy}=d;
+  const dx=px-cx,dy=py-cy,dist=Math.hypot(dx,dy);
+  if(dist>=rIn&&dist<=R+4){
+    // リング: Hue
+    _cpHue=((Math.atan2(dy,dx)*180/Math.PI)+360)%360;
+  }else{
+    // 正方形内: S,V（クランプ）
+    _cpSat=Math.max(0,Math.min(1,(px-sqX)/sq));
+    _cpVal=Math.max(0,Math.min(1,1-(py-sqY)/sq));
+  }
+  cpDrawWheel();cpUpdatePreview();
+}
+
+let _cpDragging=false;
+cpWheel.addEventListener('pointerdown',e=>{e.preventDefault();cpWheel.setPointerCapture(e.pointerId);_cpDragging=true;cpPickWheel(e.clientX,e.clientY);},{passive:false});
+cpWheel.addEventListener('pointermove',e=>{if(!_cpDragging)return;e.preventDefault();cpPickWheel(e.clientX,e.clientY);},{passive:false});
+cpWheel.addEventListener('pointerup',()=>_cpDragging=false,{passive:false});
+cpWheel.addEventListener('pointercancel',()=>_cpDragging=false,{passive:false});
+
+// グリッドカラー
+const GRID_COLORS=['#000000','#333333','#666666','#999999','#cccccc','#ffffff','#f44336','#e91e63','#9c27b0','#673ab7','#3f51b5','#2196f3','#03a9f4','#00bcd4','#009688','#4caf50','#8bc34a','#cddc39','#ffeb3b','#ffc107','#ff9800','#ff5722','#795548','#607d8b'];
+function cpBuildGrid(){
+  const grid=document.getElementById('cpicker-grid');grid.innerHTML='';
+  GRID_COLORS.forEach(hex=>{
+    const cell=document.createElement('div');cell.className='cp-cell';cell.style.background=hex;
+    cell.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();document.querySelectorAll('.cp-cell.sel').forEach(c=>c.classList.remove('sel'));cell.classList.add('sel');const[r,g,b]=hexToRgb01(hex);[_cpHue,_cpSat,_cpVal]=rgbToHsv(r,g,b);cpHexIn.value=hex;cpPreview.style.background=hex;});
+    grid.appendChild(cell);
+  });
+}
+cpHexIn.addEventListener('input',()=>{const v=cpHexIn.value;if(/^#[0-9a-fA-F]{6}$/.test(v)){const[r,g,b]=hexToRgb01(v);[_cpHue,_cpSat,_cpVal]=rgbToHsv(r,g,b);cpPreview.style.background=v;if(document.getElementById('cpicker-wheel-wrap').classList.contains('show'))cpDrawWheel();}});
+
+// タブ切替
+document.querySelectorAll('.cp-tab').forEach(tab=>{tab.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();document.querySelectorAll('.cp-tab').forEach(t=>t.classList.remove('act'));tab.classList.add('act');const t=tab.dataset.tab;document.getElementById('cpicker-wheel-wrap').classList.toggle('show',t==='wheel');document.getElementById('cpicker-grid-wrap').classList.toggle('show',t==='grid');if(t==='wheel')cpDrawWheel();});});
+
+function openColorPicker(initHex,callback){
+  _cpCallback=callback;const[r,g,b]=hexToRgb01(initHex||'#000000');
+  [_cpHue,_cpSat,_cpVal]=rgbToHsv(r,g,b);
+  cpHexIn.value=initHex||'#000000';cpPreview.style.background=initHex||'#000000';
+  cpBuildGrid();cpDrawWheel();cpModal.classList.add('show');
+}
+document.getElementById('cpicker-ok').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();if(_cpCallback){_cpCallback(cpHexIn.value);}_cpCallback=null;cpModal.classList.remove('show');});
+document.getElementById('cpicker-cancel').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();_cpCallback=null;cpModal.classList.remove('show');});
+cpModal.addEventListener('pointerdown',e=>{if(e.target===cpModal){_cpCallback=null;cpModal.classList.remove('show');}});
+
+
+// ── カーブポイントエディタ（#6） ──────────────────────────
+function initCurveEditor(canvasId,getToolFn,setToolFn){
+  const cv=document.getElementById(canvasId);if(!cv)return;
+  const W=cv.width,H=cv.height;
+  let activePt=-1;
+  function getPts(){return(getToolFn().pts||DEFAULT_PTS).map(p=>({...p}));}
+  function setPts(pts){const t=getToolFn();t.pts=pts.slice().sort((a,b)=>a.x-b.x);setToolFn(t);}
+  function ptSX(pt){return pt.x*W;}
+  function ptSY(pt){return(1-pt.y)*H;}
+  function hitTest(sx,sy,pts){for(let i=0;i<pts.length;i++){const dx=sx-ptSX(pts[i]),dy=sy-ptSY(pts[i]);if(dx*dx+dy*dy<18*18)return i;}return-1;}
+  function clampPt(pt,idx,pts){
+    const newPt={...pt};
+    newPt.y=Math.max(0,Math.min(1,newPt.y));
+    if(idx===0){newPt.x=0;}// 左端: x固定
+    else if(idx===pts.length-1){newPt.x=1;}// 右端: x固定
+    else{// 中間点: xは隣の点の間に制限
+      const xMin=pts[idx-1].x+0.01,xMax=pts[idx+1].x-0.01;
+      newPt.x=Math.max(xMin,Math.min(xMax,newPt.x));
+    }
+    return newPt;
+  }
+  function draw(){
+    const ctx=cv.getContext('2d');ctx.clearRect(0,0,W,H);
+    ctx.fillStyle='#1e1e26';ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='#2a2a3a';ctx.lineWidth=1;
+    for(let i=1;i<4;i++){ctx.beginPath();ctx.moveTo(W*i/4,0);ctx.lineTo(W*i/4,H);ctx.stroke();ctx.beginPath();ctx.moveTo(0,H*i/4);ctx.lineTo(W,H*i/4);ctx.stroke();}
+    const tool=getToolFn();const pts=getPts();
+    // 1px閾値ライン（赤）
+    if(tool.thresh>0){const tx=tool.thresh*W;ctx.strokeStyle='#f87171';ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(tx,0);ctx.lineTo(tx,H);ctx.stroke();ctx.setLineDash([]);}
+    // 最小サイズライン（緑）
+    if(tool.min>0&&tool.sz>0){const yF=(1-tool.min/tool.sz)*H;ctx.strokeStyle='#4ade80';ctx.setLineDash([2,4]);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,yF);ctx.lineTo(W,yF);ctx.stroke();ctx.setLineDash([]);}
+    // カーブ
+    ctx.strokeStyle=tool.pressure?'#5b9cf6':'#666677';ctx.lineWidth=2;ctx.beginPath();
+    for(let i=0;i<pts.length;i++){const sx=ptSX(pts[i]),sy=ptSY(pts[i]);i?ctx.lineTo(sx,sy):ctx.moveTo(sx,sy);}ctx.stroke();
+    // 制御点
+    for(let i=0;i<pts.length;i++){
+      const sx=ptSX(pts[i]),sy=ptSY(pts[i]);
+      ctx.beginPath();ctx.arc(sx,sy,i===activePt?9:6,0,Math.PI*2);
+      ctx.fillStyle=i===activePt?'#f97316':(i===0||i===pts.length-1)?'#888888':'#5b9cf6';
+      ctx.fill();ctx.strokeStyle='#ffffff';ctx.lineWidth=1.5;ctx.stroke();
+    }
+    ctx.fillStyle='#7a7a8a';ctx.font='9px "DM Mono",monospace';ctx.fillText('筆圧 →',3,H-3);ctx.fillText('↑ px',2,9);
+  }
+  function getCvXY(clientX,clientY){const rect=cv.getBoundingClientRect();return{x:(clientX-rect.left)*W/rect.width,y:(clientY-rect.top)*H/rect.height};}
+  function applyDrag(clientX,clientY){
+    if(activePt<0)return;const{x,y}=getCvXY(clientX,clientY);
+    const pts=getPts();
+    pts[activePt]=clampPt({x:x/W,y:1-y/H},activePt,pts);
+    setPts(pts);draw();
+  }
+  cv.addEventListener('pointerdown',e=>{
+    e.preventDefault();e.stopPropagation();cv.setPointerCapture(e.pointerId);
+    const{x,y}=getCvXY(e.clientX,e.clientY);activePt=hitTest(x,y,getPts());draw();
+  },{passive:false});
+  cv.addEventListener('pointermove',e=>{if(activePt<0)return;e.preventDefault();applyDrag(e.clientX,e.clientY);},{passive:false});
+  cv.addEventListener('pointerup',()=>{activePt=-1;draw();},{passive:false});
+  cv.addEventListener('pointercancel',()=>{activePt=-1;},{passive:false});
+  let touchId=-1;
+  cv.addEventListener('touchstart',e=>{
+    e.preventDefault();e.stopPropagation();
+    const t=e.changedTouches[0];touchId=t.identifier;
+    const{x,y}=getCvXY(t.clientX,t.clientY);activePt=hitTest(x,y,getPts());draw();
+  },{passive:false});
+  cv.addEventListener('touchmove',e=>{
+    e.preventDefault();e.stopPropagation();if(activePt<0)return;
+    const t=[...e.changedTouches].find(c=>c.identifier===touchId);if(!t)return;applyDrag(t.clientX,t.clientY);
+  },{passive:false});
+  cv.addEventListener('touchend',e=>{touchId=-1;activePt=-1;draw();},{passive:false});
+  cv.addEventListener('touchcancel',e=>{touchId=-1;activePt=-1;},{passive:false});
+  draw();return draw;
+}
+
+// ── スタビライザープレビュー ──────────────────────────────
+function drawStabOn(id,sv){
+  const cv=document.getElementById(id);if(!cv)return;const ctx=cv.getContext('2d'),W=cv.width,H=cv.height;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#1e1e26';ctx.fillRect(0,0,W,H);
+  const pts=[],spts=[],buf=[];
+  for(let i=0;i<=W;i++){const t=i/W,r={x:i,y:H/2+Math.sin(t*20)*6+Math.sin(t*37)*3};pts.push(r);buf.push(r);if(buf.length>sv)buf.shift();const nn=buf.length;spts.push({x:buf.reduce((a,pp)=>a+pp.x,0)/nn,y:buf.reduce((a,pp)=>a+pp.y,0)/nn});}
+  ctx.strokeStyle='#444455';ctx.lineWidth=1;ctx.beginPath();pts.forEach((pp,i)=>i?ctx.lineTo(pp.x,pp.y):ctx.moveTo(pp.x,pp.y));ctx.stroke();
+  ctx.strokeStyle='#5b9cf6';ctx.lineWidth=2;ctx.beginPath();spts.forEach((pp,i)=>i?ctx.lineTo(pp.x,pp.y):ctx.moveTo(pp.x,pp.y));ctx.stroke();
+  ctx.fillStyle='#7a7a8a';ctx.font='9px "DM Mono",monospace';ctx.fillText('白:原線 青:補正後',4,H-4);
+}
+
+// ── サブパレット（オリジナルから流用） ────────────────────
+let spPos={x:16,y:200};let spMinimized=false;let spSlots=Array(12).fill(null);
+const spEl=document.getElementById('sub-palette');const spBody=document.getElementById('sp-body');
+const spMinBtn=document.getElementById('sp-min-btn');const spDot=document.getElementById('sp-dot');
+let spActiveSlot=-1;
+function spRender(){
+  const W=window.innerWidth,H=window.innerHeight;const r=spEl.getBoundingClientRect();
+  spPos.x=Math.max(0,Math.min(W-r.width,spPos.x));spPos.y=Math.max(0,Math.min(H-r.height,spPos.y));
+  spEl.style.left=spPos.x+'px';spEl.style.top=spPos.y+'px';
+}
+let _spPD=false,_spSX=0,_spSY=0,_spBX=0,_spBY=0,_spMov=false;
+const spHeader=document.getElementById('sp-header');
+spHeader.addEventListener('touchstart',e=>{if(spMinimized)return;e.preventDefault();e.stopPropagation();const t=e.changedTouches[0];_spPD=true;_spMov=false;_spSX=t.clientX;_spSY=t.clientY;_spBX=spPos.x;_spBY=spPos.y;},{passive:false});
+spHeader.addEventListener('touchmove',e=>{if(!_spPD)return;e.preventDefault();const t=e.changedTouches[0];if(!_spMov&&(Math.abs(t.clientX-_spSX)>4||Math.abs(t.clientY-_spSY)>4))_spMov=true;if(_spMov){spPos.x=_spBX+(t.clientX-_spSX);spPos.y=_spBY+(t.clientY-_spSY);spRender();}},{passive:false});
+spHeader.addEventListener('touchend',e=>{_spPD=false;_spMov=false;},{passive:false});
+spMinBtn.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();spMinimized=!spMinimized;spEl.classList.toggle('minimized',spMinimized);spMinBtn.textContent=spMinimized?'＋':'—';spRender();});
+function spSaveCurrentTool(slotIdx){
+  const isEraser=eraserOn;const tool=activeTool;
+  if(isEraser){
+    spSlots[slotIdx]={type:'eraser',icon:'⬜',label:'消しゴム',size:eSize,
+      settings:{sz:eSize,min:eMin,pressure:ePressure,stab:eStab,thresh:eThresh,pts:TOOLS.eraser.pts.map(p=>({...p}))}};
+  }else if(tool==='pen'){
+    spSlots[slotIdx]={type:'pen',icon:'✏',label:'ペン',size:bSize,
+      settings:{sz:bSize,min:bMin,pressure:bPressure,curve:bCurve,stab:stabLen,thresh:bThresh,pts:bPts.map(p=>({...p}))}};
+  }else if(tool==='marker'){
+    spSlots[slotIdx]={type:'marker',icon:'✒',label:'マーカー',size:bSize,
+      settings:{sz:bSize,min:bMin,pressure:bPressure,curve:bCurve,stab:stabLen,thresh:bThresh,pts:bPts.map(p=>({...p}))}};
+  }
+  spRenderSlots();
+}
+function spActivateTool(slotIdx){
+  const slot=spSlots[slotIdx];if(!slot)return;spActiveSlot=slotIdx;spRenderSlots();
+  const s=slot.settings;
+  if(slot.type==='eraser'){
+    eraserOn=true;erb.classList.add('on');badge.classList.add('show');
+    eSize=s.sz||s.eSize||20;eMin=s.min||1;ePressure=!!s.pressure;eStab=s.stab||1;eThresh=s.thresh||0;
+    if(s.pts){TOOLS.eraser.pts=s.pts.map(p=>({...p}));}
+    Object.assign(TOOLS.eraser,{sz:eSize,min:eMin,pressure:ePressure,stab:eStab,thresh:eThresh});
+  }else{
+    eraserOn=false;erb.classList.remove('on');badge.classList.remove('show');
+    const target=slot.type==='marker'?'marker':'pen';if(activeTool!==target)switchTool(target);
+    bSize=s.sz;bMin=s.min;bPressure=s.pressure;bCurve=s.curve||2.0;stabLen=s.stab;
+    bThresh=s.thresh||0;
+    if(s.pts)bPts=s.pts.map(p=>({...p}));
+    Object.assign(TOOLS[target],{sz:bSize,min:bMin,pressure:bPressure,curve:bCurve,stab:stabLen,thresh:bThresh,pts:bPts.map(p=>({...p}))});
+  }
+}
+function spRenderSlots(){
+  document.querySelectorAll('.sp-slot').forEach(el=>{const idx=+el.dataset.slot,slot=spSlots[idx];
+    if(!slot){el.innerHTML='<span class="sp-slot-icon">＋</span><span class="sp-slot-label">空き</span>';el.classList.remove('has-tool','active-tool');return;}
+    el.innerHTML=`<span class="sp-slot-icon">${slot.icon}</span><span class="sp-slot-label">${slot.label}</span><span class="sp-slot-sz">${slot.size||''}px</span>`;
+    el.classList.toggle('has-tool',true);el.classList.toggle('active-tool',idx===spActiveSlot);
+  });
+}
+document.querySelectorAll('.sp-slot').forEach(el=>{
+  let _lt=0;
+  el.addEventListener('pointerdown',e=>{e.stopPropagation();e.preventDefault();const idx=+el.dataset.slot,now=Date.now();
+    if(now-_lt<400){spSaveCurrentTool(idx);showToast(`スロット${idx+1}に登録`);}
+    else{if(spSlots[idx])spActivateTool(idx);else{spSaveCurrentTool(idx);showToast(`スロット${idx+1}に登録`);}}_lt=now;
+  },{passive:false});
+});
+// ── キャンバス90°回転 ────────────────────────────────────
+async function rotateCanvas90CW(){
+  showToast('キャンバス回転中…');
+  const newW=CH,newH=CW; // swap
+  const rotatedLayers=[];
+  for(const l of gLayers){
+    const r8=new Uint8Array(CW*CH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    // 90°CW回転 (GL座標 y=0=bottom)
+    // 検証済み公式: r8new[ny*newW+nx] = r8[nx*CW+(CW-1-ny)]
+    // where newW=CH(old height), newH=CW(old width)
+    const r8new=new Uint8Array(newW*newH);
+    for(let ny=0;ny<newH;ny++){for(let nx=0;nx<newW;nx++){
+      r8new[ny*newW+nx]=r8[nx*CW+(CW-1-ny)];
+    }}
+    rotatedLayers.push({l,r8new});
+    await new Promise(r=>setTimeout(r,0));
+  }
+  const oldCW=CW,oldCH=CH;CW=newW;CH=newH;
+  timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
+  for(const{l,r8new}of rotatedLayers){
+    const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);
+    gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+    gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);
+    gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);l.tex=nt;l.fbo=nf;
+  }
+  document.getElementById('sz-cur').textContent=CW+'×'+CH;
+  document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
+  resetView();setTimeout(captureNow,0);renderLayers();showToast(`キャンバス回転完了 ${CW}×${CH}`);
+}
+document.getElementById('rotate-canvas-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();rotateCanvas90CW();});
+
+// ── 下絵（参照画像）機能 ────────────────────────────────
+function loadRefImage(imgEl){
+  refImgEl=imgEl;
+  const defScale=Math.min(CW/imgEl.width,CH/imgEl.height);
+  refTransform={cx:CW/2,cy:CH/2,scale:defScale,rot:0};
+  if(refTex){gl.deleteTexture(refTex);}
+  refTex=gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D,refTex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL,false);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,gl.RGBA,gl.UNSIGNED_BYTE,imgEl);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
   gl.bindTexture(gl.TEXTURE_2D,null);
+  scheduleDraw();
+  // プレビュー更新
+  const cv=document.getElementById('ref-preview-cv');
+  const ctx=cv.getContext('2d');const s=Math.min(220/imgEl.width,60/imgEl.height);
+  ctx.clearRect(0,0,220,60);ctx.drawImage(imgEl,(220-imgEl.width*s)/2,(60-imgEl.height*s)/2,imgEl.width*s,imgEl.height*s);
+  cv.classList.add('show');
+}
+function deleteRefImage(){
+  if(refTex){gl.deleteTexture(refTex);refTex=null;}
+  refImgEl=null;subMode=null;
+  document.getElementById('ref-preview-cv').classList.remove('show');
+  scheduleDraw();
+}
+function getRefHandles(){
+  if(!refImgEl)return{};
+  const hw=refImgEl.width*refTransform.scale/2,hh=refImgEl.height*refTransform.scale/2;
+  const cos=Math.cos(refTransform.rot),sin=Math.sin(refTransform.rot);
+  const cx=refTransform.cx,cy=refTransform.cy;
+  const rp=(lx,ly)=>canvasToScreen(cos*lx-sin*ly+cx,sin*lx+cos*ly+cy);
+  return{TL:rp(-hw,-hh),TR:rp(hw,-hh),BL:rp(-hw,hh),BR:rp(hw,hh),
+         ROT:rp(0,-hh-40/view.scale),CENTER:canvasToScreen(cx,cy)};
+}
+function hitRefHandle(sx,sy){
+  const H=getRefHandles(),R=22;
+  for(const[n,p]of Object.entries(H)){if(!p)continue;const dx=sx-p.x,dy=sy-p.y;if(dx*dx+dy*dy<R*R)return'r:'+n;}
+  return'r:MOVE';
+}
+let _refHandle=null,_refPrevPt=null;
+function applyRefHandle(h,psx,psy,csx,csy){
+  const pC=screenToCanvas(psx,psy),cC=screenToCanvas(csx,csy),dx=cC.x-pC.x,dy=cC.y-pC.y;
+  if(h==='r:CENTER'||h==='r:MOVE'){refTransform.cx+=dx;refTransform.cy+=dy;}
+  else if(h==='r:ROT'){refTransform.rot+=Math.atan2(cC.y-refTransform.cy,cC.x-refTransform.cx)-Math.atan2(pC.y-refTransform.cy,pC.x-refTransform.cx);}
+  else if(/^r:(TL|TR|BL|BR)$/.test(h)){
+    const pd=Math.hypot(pC.x-refTransform.cx,pC.y-refTransform.cy);
+    const cd=Math.hypot(cC.x-refTransform.cx,cC.y-refTransform.cy);
+    if(pd>1)refTransform.scale=Math.max(0.01,refTransform.scale*cd/pd);
+  }
+  scheduleDraw();
+}
+function drawRefHandles(ctx){
+  if(!refImgEl||subMode!=='ref')return;
+  const H=getRefHandles();
+  ctx.save();
+  // 枠線
+  const corners=[H.TL,H.TR,H.BR,H.BL];
+  ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1.5;ctx.setLineDash([5,3]);ctx.beginPath();
+  corners.forEach((p,i)=>p&&(i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)));
+  ctx.closePath();ctx.stroke();ctx.setLineDash([]);
+  // 回転ハンドル
+  if(H.ROT&&H.TL){ctx.beginPath();ctx.moveTo((H.TL.x+H.TR.x)/2,(H.TL.y+H.TR.y)/2);ctx.lineTo(H.ROT.x,H.ROT.y);ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1;ctx.stroke();}
+  // ハンドル点
+  ['TL','TR','BL','BR','ROT','CENTER'].forEach(n=>{
+    const p=H[n];if(!p)return;
+    ctx.beginPath();
+    if(n==='ROT'){ctx.arc(p.x,p.y,8,0,Math.PI*2);}
+    else if(n==='CENTER'){ctx.arc(p.x,p.y,5,0,Math.PI*2);}
+    else{ctx.rect(p.x-6,p.y-6,12,12);}
+    ctx.fillStyle='#fff';ctx.fill();ctx.strokeStyle='#5b9cf6';ctx.lineWidth=1.5;ctx.stroke();
+  });
+  ctx.restore();
 }
 
-// ── 塗りつぶし（BFS）非同期化（iPadプチフリーズ対策 #2） ─────
+// ── 塗りつぶし（BFS） ────────────────────────────────────
 async function floodFill(canvasX,canvasY){
   const x0=Math.floor(canvasX),y0=Math.floor(canvasY);
   if(x0<0||x0>=CW||y0<0||y0>=CH)return;
@@ -1384,7 +2572,7 @@ async function floodFill(canvasX,canvasY){
   if(tgt===fillVal){showToast('既に同じ色です');return;}
   showToast('塗りつぶし中…');
   const visited=new Uint8Array(CW*CH);
-  const stk=[x0,y0];visited[glR*CW+x0]=1;
+  const stk=[];stk.push(x0,y0);visited[glR*CW+x0]=1;
   let cnt=0;
   while(stk.length>0){
     const py=stk.pop(),px=stk.pop();
@@ -1396,31 +2584,313 @@ async function floodFill(canvasX,canvasY){
       if(visited[ni]||r8[ni]!==tgt)continue;
       visited[ni]=1;stk.push(nx,ny);
     }
-    if(cnt%60000===0) await new Promise(r=>setTimeout(r,0)); // yield
+    if(cnt%80000===0)await new Promise(r=>setTimeout(r,0));
   }
   writeR8Full(l,r8);
+  // イベント記録（正規化座標）
   _rec({type:'fill',layerId:l.id,layerName:l.name,x:x0/CW,y:y0/CH,eraserOn});
   showToast('塗りつぶし完了');
-  scheduleDraw();
 }
 
-// ── 残りの関数（UI・ギャラリー・PSD・BPFなど）はオリジナルそのまま保持 ──
-// （以下は元のscriptの残りの全コードを省略せず完全コピーし、変更点のみ上記で置き換え）
-// ここから元のscriptの残りをそのまま貼り付け（UI/仕様変更なし）
+// ── 3点透視法 ────────────────────────────────────────────
+// ── OPFSギャラリー ─────────────────────────────────────────
+// Origin Private File System: ブラウザ専用ストレージ（iOS 16.4+対応）
+const OPFS_DIR = 'binarypaint';
+const THUMB_W  = 480;  // サムネイル幅(px)
+const THUMB_Q  = 0.82; // JPEG品質
 
-// 以下は元のscriptの残りの部分（loadSt...からinit()まで）をそのまま保持しつつ、
-// 必要な部分だけ最適化済みコードで上書きした完全版です。
-// （完全動作確認済み：Undo/JSONキーフレーム・タイムラプス・ギャラリー・PSD入出力・下絵・回転・全UIはそのまま）
+// OPFSルートディレクトリを取得
+async function opfsRoot(){
+  const root = await navigator.storage.getDirectory();
+  return await root.getDirectoryHandle(OPFS_DIR, {create:true});
+}
 
-let ttmr;
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(ttmr);ttmr=setTimeout(()=>t.classList.remove('show'),1800);}
-function updRF(el){el.style.setProperty('--pct',((el.value-el.min)/(el.max-el.min)*100).toFixed(1)+'%');}
-// ── ファイルI/O ───────────────────────────────────────────
-function reiwaFn(){const n=new Date(),pad=v=>String(v).padStart(2,'0');return pad(n.getFullYear()-2018)+pad(n.getMonth()+1)+pad(n.getDate())+pad(n.getHours())+pad(n.getMinutes())+pad(n.getSeconds());}
-function getOutFn(inputId,fallback){const el=document.getElementById(inputId);return(el&&el.value.trim())||fallback||reiwaFn();}
+// サムネイルをJPEGBase64で生成（現在のキャンバス状態から）
+async function genThumb(){
+  const sc = Math.min(1, THUMB_W / Math.max(CW,CH));
+  const tw = Math.round(CW*sc), th = Math.round(CH*sc);
+  const tc = Object.assign(document.createElement('canvas'),{width:tw,height:th});
+  const ctx = tc.getContext('2d');
+  // 背景色
+  ctx.fillStyle = bgColor; ctx.fillRect(0,0,tw,th);
+  // 各レイヤーを合成（下から）
+  for(const l of gLayers){
+    if(!l.visible) continue;
+    const r8 = new Uint8Array(CW*CH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const col = l.color;
+    const r=Math.round(col[0]*255),g=Math.round(col[1]*255),b=Math.round(col[2]*255);
+    const tmp = Object.assign(document.createElement('canvas'),{width:CW,height:CH});
+    const tctx = tmp.getContext('2d');
+    const rgba = new Uint8ClampedArray(CW*CH*4);
+    for(let row=0;row<CH;row++){
+      const fr=CH-1-row;
+      for(let col2=0;col2<CW;col2++){
+        const v=r8[fr*CW+col2];
+        if(v){const o=(row*CW+col2)*4;rgba[o]=r;rgba[o+1]=g;rgba[o+2]=b;rgba[o+3]=Math.round(v*l.opacity);}
+      }
+    }
+    tctx.putImageData(new ImageData(rgba,CW,CH),0,0);
+    ctx.globalAlpha = l.opacity;
+    ctx.drawImage(tmp,0,0,tw,th);
+    ctx.globalAlpha = 1;
+  }
+  return tc.toDataURL('image/jpeg', THUMB_Q);
+}
 
-// 以降の全コード（loadBPFFile, saveBPFToOPFS, ギャラリー, PSD, カラー, カーブエディタ, レイヤー, サイズ変更, 回転, 下絵, 初期化など）は
-// 元のscriptと完全に同一です。変更は上記のscheduleDraw / continueStroke / floodFill / KEYFRAME_EVERYのみです。
+// BPFペイロードを生成（サムネイル埋め込み版）
+async function buildBPFPayload(thumbDataUrl){
+  const meta = {
+    version:2, CW, CH, bgColor,
+    activeIdx:gActiveIdx,
+    savedAt: new Date().toISOString(),
+    thumb: thumbDataUrl,
+    layers:[]
+  };
+  const pngParts = [];
+  for(let i=0;i<gLayers.length;i++){
+    const l = gLayers[i];
+    const r8 = new Uint8Array(CW*CH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const rgba = new Uint8ClampedArray(CW*CH*4);
+    for(let row=0;row<CH;row++){const sr=CH-1-row;for(let col=0;col<CW;col++){const oi=(row*CW+col)*4;rgba[oi+3]=r8[sr*CW+col];}}
+    const lc = Object.assign(document.createElement('canvas'),{width:CW,height:CH});
+    const lctx = lc.getContext('2d'); lctx.putImageData(new ImageData(rgba,CW,CH),0,0);
+    let pngData;
+    if(typeof lc.convertToBlob==='function'){
+      const blob = await lc.convertToBlob({type:'image/png'});
+      pngData = await new Promise(res=>{const fr=new FileReader();fr.onload=ev=>res(ev.target.result.split(',')[1]);fr.readAsDataURL(blob);});
+    } else {
+      pngData = lc.toDataURL('image/png').split(',')[1];
+    }
+    pngParts.push(pngData);
+    meta.layers.push({id:l.id,name:l.name,color:l.color,opacity:l.opacity,visible:l.visible,blend:l.blend,pngIdx:i});
+    await new Promise(r=>setTimeout(r,0));
+  }
+  return JSON.stringify({meta, pngs:pngParts});
+}
+
+// OPFSに保存（ファイル名: タイムスタンプ.bpf）
+async function saveBPFToOPFS(filename, payloadStr){
+  try{
+    const dir = await opfsRoot();
+    const fh = await dir.getFileHandle(filename, {create:true});
+    const writable = await fh.createWritable();
+    await writable.write(payloadStr);
+    await writable.close();
+    return true;
+  } catch(e){
+    console.warn('OPFS save failed:', e);
+    return false;
+  }
+}
+
+// OPFS内のBPFファイル一覧を取得（新しい順）
+async function listOPFSFiles(){
+  try{
+    const dir = await opfsRoot();
+    const files = [];
+    for await(const [name, handle] of dir.entries()){
+      if(name.endsWith('.bpf')){
+        const file = await handle.getFile();
+        files.push({name, handle, size:file.size, lastModified:file.lastModified});
+      }
+    }
+    return files.sort((a,b)=>b.lastModified-a.lastModified);
+  } catch(e){ return []; }
+}
+
+// OPFSからBPFを読み込み
+async function loadBPFFromOPFS(handle){
+  const file = await handle.getFile();
+  const text = await file.text();
+  return text;
+}
+
+// OPFSからBPFを削除
+async function deleteOPFSFile(name){
+  try{
+    const dir = await opfsRoot();
+    await dir.removeEntry(name);
+    return true;
+  } catch(e){ return false; }
+}
+
+// BPFペイロード文字列を実際に適用（loadBPFFileと同処理）
+async function applyBPFPayload(payloadStr){
+  try{
+    const payload = JSON.parse(payloadStr);
+    const {meta, pngs} = payload;
+    if(!meta.version || meta.version<1) throw new Error('バージョン不明');
+    // キャンバスサイズ変更
+    gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});
+    gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
+    CW=meta.CW;CH=meta.CH;
+    document.getElementById('sz-cur').textContent=CW+'×'+CH;
+    document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
+    if(meta.bgColor)applyBg(meta.bgColor);
+    for(let i=0;i<meta.layers.length;i++){
+      const lm=meta.layers[i]; const pngB64=pngs[lm.pngIdx];
+      await new Promise(resolve=>{
+        const img=new Image(); img.onload=()=>{
+          const tc=Object.assign(document.createElement('canvas'),{width:CW,height:CH});
+          const tctx=tc.getContext('2d'); tctx.drawImage(img,0,0);
+          const id=tctx.getImageData(0,0,CW,CH); const r8=new Uint8Array(CW*CH);
+          for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++)r8[fr*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
+          const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
+          gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+          gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+          gLayers.push({id:lm.id||(Date.now()*1000+i),name:lm.name||('Layer '+(i+1)),color:lm.color||[0,0,0],opacity:lm.opacity??1,visible:lm.visible??true,blend:lm.blend||'normal',tex,fbo});
+          resolve();
+        };
+        img.src='data:image/png;base64,'+pngB64;
+      });
+    }
+    gActiveIdx=Math.min(meta.activeIdx||0,gLayers.length-1);
+    fitView();renderLayers();scheduleDraw();setTimeout(captureNow,0);
+  } catch(err){ throw err; }
+}
+
+// ─── ギャラリーUI ──────────────────────────────────────────
+let _galPayloadForOpen = null; // プレビューダイアログ用の一時保存
+
+function galFmtDate(ts){
+  const d=new Date(ts);
+  return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+async function openGallery(){
+  document.getElementById('gallery-overlay').classList.add('show');
+  await refreshGallery();
+}
+function closeGallery(){
+  document.getElementById('gallery-overlay').classList.remove('show');
+}
+
+async function refreshGallery(){
+  const grid = document.getElementById('gallery-grid');
+  const empty = document.getElementById('gallery-empty');
+  grid.innerHTML = '<div style="color:var(--tx2);font-size:12px;padding:20px">読み込み中…</div>';
+  const files = await listOPFSFiles();
+  grid.innerHTML = '';
+  if(!files.length){
+    grid.style.display='none';empty.style.display='flex';return;
+  }
+  grid.style.display='';empty.style.display='none';
+  for(const f of files){
+    // メタデータだけ先に読む（サムネイルのみ）
+    const item = document.createElement('div');
+    item.className='gal-item';
+    item.innerHTML=`<div style="width:100%;aspect-ratio:3/2;background:#1a1a2a;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--tx2)">読み込み中…</div><div class="gal-info"><div class="gal-name">${f.name}</div><div class="gal-meta">${galFmtDate(f.lastModified)}</div></div><button class="gal-del" data-name="${f.name}">✕</button>`;
+    grid.appendChild(item);
+    // 非同期でサムネイル読み込み
+    (async()=>{
+      try{
+        const file = await f.handle.getFile();
+        const text = await file.text();
+        const meta = JSON.parse(text).meta;
+        const thumb = meta.thumb || '';
+        const thumbEl = thumb
+          ? `<img class="gal-thumb" src="${thumb}" alt="">`
+          : `<div class="gal-thumb" style="background:#fff;display:flex;align-items:center;justify-content:center;color:#ccc;font-size:11px">${meta.CW}×${meta.CH}</div>`;
+        item.querySelector('div').outerHTML = thumbEl;
+        item.querySelector('.gal-name').textContent = f.name.replace('.bpf','');
+        item.querySelector('.gal-meta').textContent = `${meta.CW}×${meta.CH} · ${meta.layers?.length||1}レイヤー · ${galFmtDate(f.lastModified)}`;
+        // タップで開く
+        item.addEventListener('pointerdown', async e=>{
+          if(e.target.classList.contains('gal-del'))return;
+          e.preventDefault();e.stopPropagation();
+          // プレビューダイアログ
+          showBPFPreview(meta, text, f.name, f.lastModified);
+        });
+      } catch(e){ item.querySelector('div').textContent='読み取りエラー'; }
+    })();
+    // 削除ボタン
+    item.querySelector('.gal-del').addEventListener('pointerdown', async e=>{
+      e.preventDefault();e.stopPropagation();
+      if(!confirm(`「${f.name}」を削除しますか？`))return;
+      await deleteOPFSFile(f.name);
+      item.remove();
+      const remaining=grid.querySelectorAll('.gal-item');
+      if(!remaining.length){grid.style.display='none';empty.style.display='flex';}
+    });
+  }
+}
+
+// プレビューダイアログ表示
+function showBPFPreview(meta, payloadStr, filename, lastModified){
+  _galPayloadForOpen = payloadStr;
+  const dlg = document.getElementById('bpf-preview-dialog');
+  const thumb = document.getElementById('bpf-preview-thumb');
+  if(meta.thumb){thumb.src=meta.thumb;thumb.style.display='block';}
+  else{thumb.style.display='none';}
+  document.getElementById('bpf-prev-size').textContent=`${meta.CW}×${meta.CH}`;
+  document.getElementById('bpf-prev-layers').textContent=`${meta.layers?.length||1}`;
+  document.getElementById('bpf-prev-date').textContent=galFmtDate(lastModified);
+  document.getElementById('bpf-prev-name').textContent=filename.replace('.bpf','');
+  dlg.classList.add('show');
+}
+function closeBPFPreview(){
+  document.getElementById('bpf-preview-dialog').classList.remove('show');
+  _galPayloadForOpen=null;
+}
+async function openFromPreview(){
+  if(!_galPayloadForOpen)return;
+  const payload=_galPayloadForOpen;
+  closeBPFPreview();closeGallery();
+  showToast('読み込み中…');
+  try{
+    await applyBPFPayload(payload);
+    showToast('読み込み完了');
+  }catch(err){showToast('読み込み失敗: '+err.message);}
+}
+
+// ─── saveBPF の置き換え（OPFS保存 + 外部ダウンロード） ──────
+async function saveBPF(downloadAlso){
+  showToast('保存中…');
+  try{
+    const thumb = await genThumb();
+    const payload = await buildBPFPayload(thumb);
+    const fn = reiwaFn()+'.bpf';
+    // OPFSに保存（常時）
+    const saved = await saveBPFToOPFS(fn, payload);
+    if(saved) showToast('ギャラリーに保存しました');
+    // 外部ダウンロードも（ボタン長押し or downloadAlso=true）
+    if(downloadAlso){
+      const blob=new Blob([payload],{type:'application/octet-stream'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a');a.href=url;a.download=fn;
+      document.body.appendChild(a);a.click();document.body.removeChild(a);
+      setTimeout(()=>URL.revokeObjectURL(url),3000);
+      showToast('ファイルも書き出しました');
+    }
+  }catch(err){showToast('保存失敗: '+err.message);console.error(err);}
+}
+
+
+// ── Wake Lock（CPU スロットリング防止） ──────────────────────
+let _wakeLock=null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      _wakeLock=await navigator.wakeLock.request('screen');
+      _wakeLock.addEventListener('release',()=>{_wakeLock=null;});
+    }
+  }catch(e){console.log('WakeLock not available:',e.message);}
+}
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState==='visible'){
+    await requestWakeLock();
+    scheduleDraw();
+  } else {
+    // バックグラウンド: 描画を停止
+    drawScheduled=false;
+  }
+});
 
 // ── init ─────────────────────────────────────────────────
 (function init(){
@@ -1429,13 +2899,18 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
   loadState();fitView();syncFlipBtn();colorBtn.classList.toggle('on',inkTransparent);
   rulerBtnEl.classList.toggle('active',rulerMode>0);syncRulerBtn();
   scheduleDraw();setTimeout(captureNow,0);spRender();
+  // タイムラプス
+  // 再生ボタン
+  // ギャラリーボタン
   document.getElementById('gallery-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();openGallery();});
   document.getElementById('gallery-close').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();closeGallery();});
   document.getElementById('gal-open-external').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();document.getElementById('file-input').click();closeGallery();});
   document.getElementById('gal-save-now').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();saveBPF(false);});
+  // BPFプレビューダイアログ
   document.getElementById('bpf-prev-cancel').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();closeBPFPreview();});
   document.getElementById('bpf-prev-open').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();openFromPreview();});
   document.getElementById('bpf-preview-dialog').addEventListener('pointerdown',e=>{if(e.target===document.getElementById('bpf-preview-dialog'))closeBPFPreview();});
+  // 保存ボタン: 通常タップ=OPFS保存, 長押し=ダウンロードも
   let _saveTimer=null;
   document.getElementById('bpf-save-btn').addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();
@@ -1445,10 +2920,12 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
     if(_saveTimer){clearTimeout(_saveTimer);_saveTimer=null;saveBPF(false);}
   });
   document.getElementById('bpf-save-btn').addEventListener('pointercancel',e=>{clearTimeout(_saveTimer);_saveTimer=null;});
-  document.getElementById('tl-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();startCanvasReplay();});
+    document.getElementById('tl-btn').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();startCanvasReplay();});
+  // 再生コントロール
   document.getElementById('replay-playpause').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();pauseResumeReplay();});
   document.getElementById('replay-stop').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();stopCanvasReplay();});
   document.getElementById('tl-export').addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();tlExportJSON();});
+  // プログレスバースクラブ
   (function(){
     const prog=document.getElementById('replay-prog');
     let dragging=false;
@@ -1459,8 +2936,11 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
     prog.addEventListener('touchstart',e=>{e.preventDefault();seek(e);},{passive:false});
     prog.addEventListener('touchmove',e=>{e.preventDefault();seek(e);},{passive:false});
   })();
+  // rec-dot（常時録画中表示）
   setTimeout(()=>document.getElementById('rec-dot').classList.add('show'),2000);
 
+  // ── ペン設定スライダー
+  // カーブエディタを先に定義してからスライダー初期化
   const drawPenCurve=initCurveEditor('curve-cv',
     ()=>({pts:TOOLS.pen.pts,min:TOOLS.pen.min,sz:TOOLS.pen.sz,pressure:TOOLS.pen.pressure,thresh:TOOLS.pen.thresh||0}),
     (t)=>{TOOLS.pen.pts=t.pts;if(activeTool==='pen')bPts=TOOLS.pen.pts;}
@@ -1476,6 +2956,7 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
   document.getElementById('cb-pr').addEventListener('change',e=>{TOOLS.pen.pressure=e.target.checked;if(activeTool==='pen')bPressure=e.target.checked;document.getElementById('pr-sec').style.opacity=e.target.checked?'1':'0.4';drawPen();});
   document.getElementById('pr-sec').style.opacity=TOOLS.pen.pressure?'1':'0.4';
 
+  // ── マーカー設定スライダー
   const drawMkCurve=initCurveEditor('mk-curve-cv',
     ()=>({pts:TOOLS.marker.pts,min:TOOLS.marker.min,sz:TOOLS.marker.sz,pressure:TOOLS.marker.pressure,thresh:TOOLS.marker.thresh||0}),
     (t)=>{TOOLS.marker.pts=t.pts;if(activeTool==='marker')bPts=TOOLS.marker.pts;}
@@ -1489,6 +2970,11 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
   document.getElementById('cb-mk-pr').addEventListener('change',e=>{TOOLS.marker.pressure=e.target.checked;if(activeTool==='marker')bPressure=e.target.checked;document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';drawMk();});
   document.getElementById('mk-pr-sec').style.opacity=TOOLS.marker.pressure?'1':'0.4';
 
+  // 消しゴムモードUI
+  document.querySelectorAll('.mode-btn').forEach(b=>{b.classList.toggle('sel',b.dataset.mode===erbMode);});
+  erb.classList.toggle('on',eraserOn);badge.classList.toggle('show',eraserOn);
+
+  // 消しゴム設定スライダー（ブラシと同等）
   const drawErCurve=initCurveEditor('er-curve-cv',
     ()=>({pts:TOOLS.eraser.pts,min:TOOLS.eraser.min,sz:TOOLS.eraser.sz,pressure:TOOLS.eraser.pressure,thresh:TOOLS.eraser.thresh||0}),
     (t)=>{TOOLS.eraser.pts=t.pts;}
@@ -1506,6 +2992,7 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
   document.getElementById('sz-cur').textContent=CW+'×'+CH;
   document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
 
+  // ブラシ・パレットリセット
   document.getElementById('sz-reset').addEventListener('pointerdown',e=>{
     e.preventDefault();e.stopPropagation();
     const defPts=DEFAULT_PTS.map(p=>({...p}));
@@ -1513,6 +3000,7 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
     TOOLS.marker={sz:12,min:1,pressure:false,curve:2.0,stab:1,thresh:0.05,pts:DEFAULT_PTS.map(p=>({...p}))};
     activeTool='pen';loadToolState('pen');
     eSize=20;spSlots=Array(12).fill(null);spActiveSlot=-1;spRenderSlots();
+    // スライダーUI再初期化
     document.getElementById('v-sz').textContent=bSize+'px';document.getElementById('v-msz').textContent=bMin+'px';
     document.getElementById('v-stab').textContent=stabLen;document.getElementById('v-thr').textContent=Math.round(bThresh*100)+'%';
     drawPen&&drawPen();drawMk&&drawMk();
@@ -1536,5 +3024,4 @@ function getOutFn(inputId,fallback){const el=document.getElementById(inputId);re
   window.addEventListener('visibilitychange',()=>{if(!document.hidden)scheduleDraw();});
 })();
 </script>
-</body>
-</html>
+</body></html>
