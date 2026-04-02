@@ -247,10 +247,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 #replay-spd{background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;
   color:var(--tx);font-size:11px;padding:5px 6px;cursor:pointer;touch-action:manipulation}
 #replay-cnt{font-size:10px;color:var(--tx2);font-family:'DM Mono',monospace;white-space:nowrap}
-#rec-dot{position:fixed;top:11px;left:50%;transform:translateX(-50%);z-index:221;
-  width:8px;height:8px;border-radius:50%;background:#f87171;display:none;pointer-events:none}
-#rec-dot.show{display:block;animation:recpulse 1.2s ease-in-out infinite}
-@keyframes recpulse{0%,100%{opacity:1}50%{opacity:0.3}}
+50%{opacity:0.3}}
 
 /* ギャラリー */
 #gallery-btn{right:calc(10px + 80px + 6px + 52px + 6px + 44px + 6px + 44px + 6px + 52px + 6px + 44px + 6px + 64px + 6px)}
@@ -322,7 +319,6 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
     <button id="tl-export" style="padding:6px 10px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:10px;cursor:pointer;touch-action:manipulation;white-space:nowrap">JSON書出</button>
   </div>
 </div>
-<div id="rec-dot"></div>
 <div id="replay-bar">
   <button id="replay-stop">■</button>
   <button id="replay-playpause">▶</button>
@@ -929,7 +925,7 @@ function unpackBits(bits,n){
 // キーフレーム（ピクセルデータ）はUNDO高速化のためだけに使用。
 // JSONエクスポートはピクセルデータなし・全操作が人間可読形式。
 
-const KEYFRAME_EVERY=50; // Nイベントごとにキーフレーム（増やしてreadPixels頻度削減）
+const KEYFRAME_EVERY=100; // 100イベントごとにキーフレーム（半分に削減）
 let timeline=[],timelinePos=-1;
 let _recStroke=null,_strokeCount=0;
 let undoBusy=false,lastCaptureTime=0;
@@ -973,7 +969,7 @@ async function readAllLayersAsync(){
 function _tlPush(entry){
   if(timelinePos<timeline.length-1) timeline.length=timelinePos+1;
   timeline.push(entry);timelinePos=timeline.length-1;
-  while(timeline.length>80){ // メモリ節約: 最大80エントリ
+  while(timeline.length>40){ // メモリ節約: 最大40エントリ（半分）
     const i=timeline.findIndex((e,j)=>j>0&&e.type==='keyframe');
     if(i<0)break;
     timeline.splice(0,i);timelinePos=timeline.length-1;
@@ -1206,7 +1202,7 @@ function _replayFinish(){
   isReplaying=false;_replayPaused=false;
   document.getElementById('replay-bar').classList.remove('show');
   document.getElementById('tl-btn').textContent='再生';
-  document.getElementById('rec-dot').classList.remove('show');
+  
   // 現在のtimelinePosに戻す
   _restoreToPos(timelinePos);
   showToast('再生完了');
@@ -1233,7 +1229,7 @@ function stopCanvasReplay(){
   isReplaying=false;_replayPaused=false;
   document.getElementById('replay-bar').classList.remove('show');
   document.getElementById('tl-btn').textContent='再生';
-  document.getElementById('rec-dot').classList.remove('show');
+  
   _restoreToPos(timelinePos);
 }
 
@@ -1646,6 +1642,8 @@ document.addEventListener('touchstart',function(e){
   // 定規モード
   if(rulerMode>0){snapshotBeforeStroke();if(_recStroke)_recStroke.tool='ruler';rulerStart=screenToCanvas(st.clientX,st.clientY);rulerPreviewPt={x:st.clientX,y:st.clientY};drawSelOv();return;}
   updPRC(st.clientX,st.clientY,st.force);schedulePanelAutoClose();
+  // ペン開始時: 指ナビ状態をリセット（手のひら同時タッチの誤動作防止）
+  ftouches.clear();maxFC=0;fMoved=false;panBase=null;pinchBase=null;
   _startPenWatchdog();
   snapshotBeforeStroke();
   beginStroke(st.clientX,st.clientY,st.force);
@@ -1749,6 +1747,8 @@ document.addEventListener('touchstart',function(e){
       if(!p.contains(e.target)&&(!trigger||!trigger.contains(e.target))){p.classList.remove('open');}
     });
   }
+  // ペン描画中は手のひら・指のタッチをナビゲーションに使わない（パームリジェクション）
+  if(penId!==null)return;
   const prev=ftouches.size;
   for(let i=0;i<e.changedTouches.length;i++){
     const t=e.changedTouches[i];
@@ -1761,6 +1761,7 @@ document.addEventListener('touchstart',function(e){
 },{passive:false,capture:false});
 document.addEventListener('touchmove',function(e){
   if(hasStylusT(e.touches))return;
+  if(penId!==null)return; // ペン中は指ナビ無効
   if(isNativeEl(e.target))return;e.preventDefault();
   for(let i=0;i<e.changedTouches.length;i++){
     const t=e.changedTouches[i];
@@ -1805,7 +1806,7 @@ document.addEventListener('touchcancel',function(e){
 // ── 左ボタン・パネル・スライダー ─────────────────────────
 function makeDraggableBtn(el,initY,onTap){
   let BY=initY,PD=false,Mov=false,SY=0,BaseY=0;el.style.top=BY+'px';
-  el.addEventListener('touchstart',function(e){e.preventDefault();e.stopPropagation();PD=true;Mov=false;SY=e.changedTouches[0].clientY;BaseY=BY;},{passive:false});
+  el.addEventListener('touchstart',function(e){if(penId!==null)return;e.preventDefault();e.stopPropagation();PD=true;Mov=false;SY=e.changedTouches[0].clientY;BaseY=BY;},{passive:false});
   el.addEventListener('touchmove',function(e){if(!PD)return;e.preventDefault();const dy=e.changedTouches[0].clientY-SY;if(Math.abs(dy)>6){Mov=true;BY=Math.max(38,Math.min(window.innerHeight-38,BaseY+dy));el.style.top=BY+'px';}},{passive:false});
   el.addEventListener('touchend',function(e){if(!PD)return;e.preventDefault();e.stopPropagation();PD=false;if(!Mov)onTap();Mov=false;},{passive:false});
   el.addEventListener('touchcancel',function(){PD=false;Mov=false;},{passive:false});
@@ -3145,8 +3146,7 @@ function buildKeyframeSnapAsync(layers){
     prog.addEventListener('touchstart',e=>{e.preventDefault();seek(e);},{passive:false});
     prog.addEventListener('touchmove',e=>{e.preventDefault();seek(e);},{passive:false});
   })();
-  // rec-dot（常時録画中表示）
-  setTimeout(()=>document.getElementById('rec-dot').classList.add('show'),2000);
+
 
   // ── ペン設定スライダー
   // カーブエディタを先に定義してからスライダー初期化
