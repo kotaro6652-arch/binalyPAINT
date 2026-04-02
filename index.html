@@ -209,21 +209,12 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 #fill-btn.on{border-color:var(--aqua);color:var(--aqua);background:#0f2a2a}
 /* rotate moves right */
 #rotate-canvas-btn{position:fixed;top:10px;left:calc(148px + 84px + 8px + 60px + 6px + 60px + 6px);z-index:220;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:6px 10px;font-size:11px;color:var(--tx2);cursor:pointer;display:flex;align-items:center;gap:4px;touch-action:manipulation;white-space:nowrap}
-/* ref-btn / persp-btn on right side */
+/* ref-btn on right side */
 #ref-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px)}
 #ref-btn.on{border-color:var(--acc);color:var(--acc)}
-#persp-btn{right:calc(10px + 80px + 6px + 76px + 6px + 56px + 6px + 56px + 6px + 64px + 6px + 60px + 6px)}
-#persp-btn.on{border-color:#a78bfa;color:#a78bfa}
 /* ref-panel */
 #ref-panel{left:10px;min-width:240px}
-/* persp-panel */
-#persp-panel{left:10px;min-width:260px}
-.vp-row{display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:6px 8px;background:var(--sf2);border-radius:6px;border-left:3px solid #888}
-.vp-row.vp-x{border-left-color:#f87171}
-.vp-row.vp-y{border-left-color:#4ade80}
-.vp-row.vp-z{border-left-color:#60a5fa}
-.vp-lbl{font-size:10px;color:var(--tx);font-family:'DM Mono',monospace;flex:1}
-.vp-coord{font-size:9px;color:var(--tx2);font-family:'DM Mono',monospace}
+
 .ref-preview{width:100%;height:60px;background:#1a1a24;border-radius:6px;border:1px solid var(--bd);margin-bottom:8px;object-fit:contain;display:none}
 .ref-preview.show{display:block}
 </style>
@@ -238,7 +229,6 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
 <div id="fill-btn">🪣 塗り</div>
 <div id="rotate-canvas-btn">↻ 90°</div>
 <div class="topbtn" id="ref-btn">📎 下絵</div>
-<div class="topbtn" id="persp-btn">📐 透視</div>
 <input type="file" id="ref-file-input" accept="image/*" style="display:none">
 <div class="toppanel" id="ref-panel">
   <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:8px">📎 下絵設定</div>
@@ -249,25 +239,7 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
     <button id="ref-transform-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:11px;cursor:pointer;touch-action:manipulation">↔ 変形</button>
     <button id="ref-delete-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--red);border-radius:8px;color:var(--red);font-size:11px;cursor:pointer;touch-action:manipulation">🗑 削除</button>
   </div>
-</div>
-<div class="toppanel" id="persp-panel">
-  <div style="font-size:12px;font-weight:500;color:var(--tx);margin-bottom:6px">📐 3点透視法</div>
-  <canvas id="vp-minimap" width="520" height="320" style="width:100%;border:1px solid var(--bd);border-radius:6px;background:#0d0d14;display:block;margin-bottom:6px;touch-action:none;cursor:crosshair"></canvas>
-  <div class="vp-row vp-x"><span class="vp-lbl">VP1 X軸</span><span class="vp-coord" id="vp1-coord">---</span><span class="vp-coord" id="vp1-ang" style="margin-left:4px;color:#f87171"></span></div>
-  <div class="vp-row vp-y"><span class="vp-lbl">VP2 Y軸</span><span class="vp-coord" id="vp2-coord">---</span><span class="vp-coord" id="vp2-ang" style="margin-left:4px;color:#4ade80"></span></div>
-  <div class="vp-row vp-z"><span class="vp-lbl">VP3 Z軸</span><span class="vp-coord" id="vp3-coord">---</span><span class="vp-coord" id="vp3-ang" style="margin-left:4px;color:#60a5fa"></span></div>
-  <div style="display:flex;gap:4px;margin-top:6px;margin-bottom:6px">
-    <button id="vp-snap-h" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">⬌ 水平</button>
-    <button id="vp-snap-v" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">⬍ 垂直</button>
-    <button id="vp-snap-eq" style="flex:1;padding:5px 3px;background:var(--sf2);border:1px solid var(--bd2);border-radius:6px;color:var(--tx2);font-size:9px;cursor:pointer;touch-action:manipulation">↔ 均等</button>
-  </div>
-  <div class="row"><label>線の数</label><div class="csl" id="csl-persp-n" data-min="4" data-max="64" data-ratio="4"></div><span class="val" id="v-persp-n">12</span></div>
-  <div style="display:flex;gap:6px;margin-top:8px">
-    <button id="persp-reset-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--bd2);border-radius:8px;color:var(--tx2);font-size:11px;cursor:pointer;touch-action:manipulation">↺ リセット</button>
-    <button id="persp-gen-btn" style="flex:1;padding:7px;background:var(--sf2);border:1px solid var(--acc);border-radius:8px;color:var(--acc);font-size:11px;cursor:pointer;touch-action:manipulation">📎 下絵に変換</button>
-  </div>
-</div>
-<div class="topbtn" id="export-btn">📤 書き出し</div>
+</div><div class="topbtn" id="export-btn">📤 書き出し</div>
 <div class="topbtn" id="bpf-save-btn">💾 保存</div>
 <label class="topbtn" id="open-btn" for="file-input">📂 開く</label>
 <div class="topbtn" id="new-btn">🆕 新規</div>
@@ -427,13 +399,10 @@ let eraserOn=false,erbMode='toggle';
 let ftouches=new Map(),maxFC=0,fMoved=false,gStart=0,panBase=null,pinchBase=null;
 let openPanel=null,pendingSize=null;
 // ── 下絵・透視・塗りつぶし 状態 ─────────────────────────
-let subMode=null; // null | 'ref' | 'persp' | 'fill'
+let subMode=null; // null | 'ref' | 'fill'
 // 下絵
 let refImgEl=null,refTex=null,refOpacity=0.5;
 let refTransform={cx:0,cy:0,scale:1,rot:0};
-// 透視
-let perspVPs=null; // 初期化はinitで（CW/CH依存）
-let perspLineCount=12;
 // 塗りつぶし
 let fillMode=false;
 let inkTransparent=false;
@@ -1126,7 +1095,6 @@ function drawSelOv(){
     if(rulerPreviewPt){sovCtx.save();sovCtx.strokeStyle='#38d9d9';sovCtx.lineWidth=1.5;sovCtx.setLineDash([6,3]);sovCtx.beginPath();sovCtx.moveTo(s.x,s.y);sovCtx.lineTo(rulerPreviewPt.x,rulerPreviewPt.y);sovCtx.stroke();sovCtx.restore();}
   }
   drawRefHandles(sovCtx);
-  drawPerspOverlay(sovCtx);
   if(selState==='transform'&&selImg&&selBBox&&selTx){
     if(origLassoPath.length>2){sovCtx.save();sovCtx.fillStyle=bgColor;sovCtx.beginPath();origLassoPath.forEach((p,i)=>{const sp=canvasToScreen(p.x,p.y);i?sovCtx.lineTo(sp.x,sp.y):sovCtx.moveTo(sp.x,sp.y);});sovCtx.closePath();sovCtx.fill();sovCtx.restore();}
     drawMeshWarp(sovCtx,selImg,selBBox.w,selBBox.h,(r,c)=>meshPtS(r,c));
@@ -1141,7 +1109,7 @@ let rulerPreviewPt=null;
 function isStylusT(t){return t.touchType==='stylus';}
 function getStylusT(list){for(let i=0;i<list.length;i++)if(isStylusT(list[i]))return list[i];return null;}
 const TAB_MAP={'tab-br':'brush','tab-mk':'marker','tab-er':'eraser','tab-ly':'layers','tab-dot':null};
-function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette,#sel-btn,#flip-btn,#color-btn,#erb,#ruler-btn,#bg-wrap,#sz-btn,#export-btn,#bpf-save-btn,#open-btn,#fill-btn,#ref-btn,#persp-btn'))return'ui';if(el.closest('#vp-minimap'))return'vp-minimap';return'canvas';}
+function classifyPenTarget(x,y){const el=document.elementFromPoint(x,y);if(!el)return'canvas';if(el.closest('.rpanel.open')||el.closest('.toppanel.open'))return'panel';if(el.closest('#sub-palette,#sel-btn,#flip-btn,#color-btn,#erb,#ruler-btn,#bg-wrap,#sz-btn,#export-btn,#bpf-save-btn,#open-btn,#fill-btn,#ref-btn'))return'ui';return'canvas';}
 document.addEventListener('touchstart',function(e){
   const st=getStylusT(e.changedTouches);if(!st)return;
   // カラーピッカー表示中はペン処理をスキップ
@@ -1150,19 +1118,6 @@ document.addEventListener('touchstart',function(e){
   if(hitEl){const tab=hitEl.closest('.rtab');if(tab&&TAB_MAP[tab.id]){e.preventDefault();openPanelFn(TAB_MAP[tab.id]);return;}}
   const tgt=classifyPenTarget(st.clientX,st.clientY);
   if(tgt==='panel')return;if(tgt==='ui'){closePanel();return;}
-  // ミニマップ: ペンでVPを直接ドラッグ
-  if(tgt==='vp-minimap'){
-    e.preventDefault();
-    const cv=document.getElementById('vp-minimap');if(!cv)return;
-    const r=cv.getBoundingClientRect();
-    const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
-    const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
-    const mx=(st.clientX-r.left)*cv.width/rw,my=(st.clientY-r.top)*cv.height/rh;
-    _mmDragVP=hitMMVP(mx,my,cv.width,cv.height);
-    if(_mmDragVP<0)_mmDragVP=0; // ヒットしなければVP1をデフォルト選択
-    penId=st.identifier;
-    return;
-  }
   e.preventDefault();
   if(openPanel)closePanel();
   document.getElementById('sz-panel').classList.remove('open');document.getElementById('sv-panel').classList.remove('open');
@@ -1180,11 +1135,6 @@ document.addEventListener('touchstart',function(e){
     _refHandle=hitRefHandle(st.clientX,st.clientY);
     _refPrevPt={x:st.clientX,y:st.clientY};
     return;
-  }
-  // 透視モード: ペンでVP移動
-  if(subMode==='persp'){
-    _perspDragVP=hitPerspVP(st.clientX,st.clientY);
-    if(_perspDragVP>=0)return;
   }
   // 塗りつぶしモード
   if(subMode==='fill'){
@@ -1206,28 +1156,10 @@ document.addEventListener('touchmove',function(e){
     selPrevPt={x:st.clientX,y:st.clientY};
     return;
   }
-  // ミニマップVPドラッグ（ペン）
-  if(_mmDragVP>=0){
-    const cv=document.getElementById('vp-minimap');if(cv){
-      const r=cv.getBoundingClientRect();
-      const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
-      const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
-      const mx=(st.clientX-r.left)*cv.width/rw,my=(st.clientY-r.top)*cv.height/rh;
-      const cp=mmToCanvas(mx,my,cv.width,cv.height);
-      perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
-      updatePerspCoords();drawSelOv();return;
-    }
-  }
   // 下絵変形
   if(subMode==='ref'&&_refHandle&&_refPrevPt){
     applyRefHandle(_refHandle,_refPrevPt.x,_refPrevPt.y,st.clientX,st.clientY);
     _refPrevPt={x:st.clientX,y:st.clientY};drawSelOv();return;
-  }
-  // 透視VP移動
-  if(subMode==='persp'&&_perspDragVP>=0){
-    const cp=screenToCanvas(st.clientX,st.clientY);
-    perspVPs[_perspDragVP]={x:cp.x,y:cp.y};
-    updatePerspCoords();drawSelOv();return;
   }
   // 塗りつぶしモード: touchmoveは無視
   if(subMode==='fill')return;
@@ -1274,9 +1206,7 @@ document.addEventListener('touchend',function(e){
     rulerStart=null;rulerPreviewPt=null;drawSelOv();captureStroke();return;
   }
   if(selState==='transform'){selHandle=null;selPrevPt=null;return;}
-  if(_mmDragVP>=0){_mmDragVP=-1;return;}
   if(subMode==='ref'){_refHandle=null;_refPrevPt=null;return;}
-  if(subMode==='persp'){_perspDragVP=-1;return;}
   if(subMode==='fill'){penId=null;return;}
   selHandle=null;selPrevPt=null;if(selState==='lasso'){drawSelOv();return;}
   finishStroke();captureStroke();
@@ -1303,6 +1233,17 @@ document.addEventListener('touchstart',function(e){
   if(hasStylusT(e.touches))return;
   if(isNativeEl(e.target))return;
   e.preventDefault();
+  // 指タップでパネルを閉じる（パネル外・UI外タップ）
+  if(ftouches.size===0){
+    // rpanel (右パネル)
+    if(openPanel){const rp=document.querySelector('.rpanel.open');if(rp&&!rp.contains(e.target)&&!document.getElementById('rpanel-group').contains(e.target)){closePanel();}}
+    // toppanel (上部パネル)
+    document.querySelectorAll('.toppanel.open').forEach(p=>{
+      const triggerId=p.id==='ref-panel'?'ref-btn':p.id==='sz-panel'?'sz-btn':p.id==='sv-panel'?'export-btn':null;
+      const trigger=triggerId?document.getElementById(triggerId):null;
+      if(!p.contains(e.target)&&(!trigger||!trigger.contains(e.target))){p.classList.remove('open');}
+    });
+  }
   const prev=ftouches.size;
   for(let i=0;i<e.changedTouches.length;i++){
     const t=e.changedTouches[i];
@@ -2196,307 +2137,6 @@ async function floodFill(canvasX,canvasY){
 }
 
 // ── 3点透視法 ────────────────────────────────────────────
-function initPerspVPs(){
-  perspVPs=[
-    {x:CW*1.8,y:CH*0.5},   // VP1 X軸（赤）右
-    {x:-CW*0.8,y:CH*0.5},  // VP2 Y軸（緑）左
-    {x:CW*0.5,y:-CH*0.8},  // VP3 Z軸（青）上
-  ];
-}
-const VP_COLORS=['#f87171','#4ade80','#60a5fa'];
-const VP_NAMES=['vp1','vp2','vp3'];
-function vpAngle(vi){
-  // vi=0: VP1(X)とVP2(Y)がなす角（消失点間の水平線から）
-  // VP1からキャンバス中心へのベクトルの角度
-  const cx=CW/2,cy=CH/2;
-  const vp=perspVPs[vi];
-  const ang=Math.atan2(vp.y-cy,vp.x-cx)*180/Math.PI;
-  return Math.round(ang)+'°';
-}
-function updatePerspCoords(){
-  perspVPs.forEach((vp,i)=>{
-    const el=document.getElementById(['vp1','vp2','vp3'][i]+'-coord');
-    if(el)el.textContent=`(${Math.round(vp.x)},${Math.round(vp.y)})`;
-    const ea=document.getElementById(['vp1','vp2','vp3'][i]+'-ang');
-    if(ea)ea.textContent=vpAngle(i);
-  });
-  drawVPMinimap();
-}
-
-// ── VP ミニマップ ─────────────────────────────────────────
-// ミニマップはキャンバスと同じアスペクト比
-// 表示範囲: キャンバス中心から±MM_PAD倍
-const MM_PAD=2.5; // キャンバス半幅の何倍まで表示するか
-let _mmDragVP=-1,_mmCanvas=null;
-
-function getMmDims(){
-  const cv=document.getElementById('vp-minimap');if(!cv)return{W:520,H:320};
-  // キャンバスアスペクト比に合わせた実際の描画サイズ
-  const aspect=CW/CH;
-  const W=cv.width; // 固定幅
-  const H=Math.round(W/aspect);
-  return{W,H,aspect};
-}
-function mmToCanvas(mx,my,W,H){
-  // ミニマップ(0,0)-(W,H) → キャンバス座標
-  const rangeX=CW*MM_PAD*2,rangeY=CH*MM_PAD*2;
-  const ox=CW*(1-MM_PAD),oy=CH*(1-MM_PAD);
-  return{x:ox+mx/W*rangeX, y:oy+my/H*rangeY};
-}
-function canvasToMM(cx,cy,W,H){
-  const rangeX=CW*MM_PAD*2,rangeY=CH*MM_PAD*2;
-  const ox=CW*(1-MM_PAD),oy=CH*(1-MM_PAD);
-  return{x:(cx-ox)/rangeX*W, y:(cy-oy)/rangeY*H};
-}
-function drawVPMinimap(){
-  const cv=document.getElementById('vp-minimap');if(!cv)return;
-  _mmCanvas=cv;
-  const W=cv.width,H=cv.height;
-  const ctx=cv.getContext('2d');
-  ctx.clearRect(0,0,W,H);
-  ctx.fillStyle='#0d0d14';ctx.fillRect(0,0,W,H);
-  // キャンバス領域をミニマップ内に描画
-  const p0=canvasToMM(0,0,W,H),p1=canvasToMM(CW,CH,W,H);
-  ctx.fillStyle='#1a1a26';ctx.fillRect(p0.x,p0.y,p1.x-p0.x,p1.y-p0.y);
-  ctx.strokeStyle='#3a3a4a';ctx.lineWidth=1.5;ctx.strokeRect(p0.x,p0.y,p1.x-p0.x,p1.y-p0.y);
-  // キャンバス中心十字
-  const pc=canvasToMM(CW/2,CH/2,W,H);
-  ctx.strokeStyle='#2a2a3a';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(p0.x,pc.y);ctx.lineTo(p1.x,pc.y);ctx.stroke();
-  ctx.beginPath();ctx.moveTo(pc.x,p0.y);ctx.lineTo(pc.x,p1.y);ctx.stroke();
-  // VPを結ぶ線（水平線）
-  ctx.setLineDash([3,2]);
-  const vs=perspVPs.map(vp=>canvasToMM(vp.x,vp.y,W,H));
-  ctx.strokeStyle='rgba(255,255,255,0.25)';ctx.lineWidth=1;
-  ctx.beginPath();ctx.moveTo(vs[0].x,vs[0].y);ctx.lineTo(vs[1].x,vs[1].y);ctx.stroke();
-  ctx.setLineDash([]);
-  // 透視グリッドプレビュー（ミニマップ内）
-  perspVPs.forEach((vp,vi)=>{
-    const sp=canvasToMM(vp.x,vp.y,W,H);
-    const corners=[[0,0],[W,0],[W,H],[0,H]];
-    const angles=corners.map(([cx,cy])=>Math.atan2(cy-sp.y,cx-sp.x));
-    let aMin=Math.min(...angles),aMax=Math.max(...angles);
-    if(aMax-aMin>Math.PI){const adj=angles.map(a=>a<0?a+Math.PI*2:a);aMin=Math.min(...adj);aMax=Math.max(...adj);}
-    ctx.strokeStyle=VP_COLORS[vi]+'44';ctx.lineWidth=0.8;
-    function clipMM(vx,vy,dx,dy){
-      let tn=-1e9,tx=1e9;
-      function cl(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tn=Math.max(tn,t);else tx=Math.min(tx,t);}return true;}
-      if(!cl(-dx,vx))return null;if(!cl(dx,W-vx))return null;
-      if(!cl(-dy,vy))return null;if(!cl(dy,H-vy))return null;
-      if(tn>tx)return null;return{x0:vx+dx*tn,y0:vy+dy*tn,x1:vx+dx*tx,y1:vy+dy*tx};
-    }
-    const NP=Math.min(perspLineCount,20);
-    for(let i=0;i<=NP;i++){
-      const a=aMin+(aMax-aMin)*i/NP;
-      const seg=clipMM(sp.x,sp.y,Math.cos(a),Math.sin(a));
-      if(!seg)continue;
-      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
-    }
-  });
-  // VPハンドル
-  perspVPs.forEach((vp,vi)=>{
-    const sp=canvasToMM(vp.x,vp.y,W,H);
-    // ミニマップ外のVPはエッジにクランプして表示
-    const bx=Math.max(8,Math.min(W-8,sp.x)),by=Math.max(8,Math.min(H-8,sp.y));
-    const isClipped=sp.x<0||sp.x>W||sp.y<0||sp.y>H;
-    ctx.beginPath();ctx.arc(bx,by,isClipped?6:8,0,Math.PI*2);
-    ctx.fillStyle=VP_COLORS[vi];ctx.fill();
-    if(isClipped){ctx.strokeStyle='#fff8';ctx.lineWidth=1.5;ctx.setLineDash([2,2]);ctx.stroke();ctx.setLineDash([]);}
-    else{ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();}
-    ctx.fillStyle='#fff';ctx.font='bold 7px "DM Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(['X','Y','Z'][vi],bx,by);
-  });
-}
-function hitMMVP(mx,my,W,H){
-  for(let i=0;i<3;i++){
-    const sp=canvasToMM(perspVPs[i].x,perspVPs[i].y,W,H);
-    if(Math.hypot(mx-sp.x,my-sp.y)<10)return i;
-  }
-  return-1;
-}
-function initMMEvents(){
-  const cv=document.getElementById('vp-minimap');if(!cv)return;
-  // getBoundingClientRect はdisplay:none時に0を返すのでcv.width/heightを使用
-  function getMMPt(clientX,clientY){
-    const r=cv.getBoundingClientRect();
-    // rectが有効なときはそれを使い、無効（width=0）なら属性値フォールバック
-    const rw=r.width>0?r.width:cv.offsetWidth||cv.width;
-    const rh=r.height>0?r.height:cv.offsetHeight||cv.height;
-    return{x:(clientX-r.left)*cv.width/rw,y:(clientY-r.top)*cv.height/rh};
-  }
-  cv.addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();cv.setPointerCapture(e.pointerId);
-    const{x,y}=getMMPt(e.clientX,e.clientY);
-    _mmDragVP=hitMMVP(x,y,cv.width,cv.height);
-  },{passive:false});
-  cv.addEventListener('pointermove',e=>{
-    if(_mmDragVP<0)return;e.preventDefault();
-    const{x,y}=getMMPt(e.clientX,e.clientY);
-    const cp=mmToCanvas(x,y,cv.width,cv.height);
-    perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
-    updatePerspCoords();drawSelOv();
-  },{passive:false});
-  cv.addEventListener('pointerup',()=>_mmDragVP=-1,{passive:false});
-  cv.addEventListener('pointercancel',()=>_mmDragVP=-1,{passive:false});
-  // タッチ対応（ペンは vp-minimap のtouchstartには来ないのでここは指用）
-  let _tid=-1;
-  cv.addEventListener('touchstart',e=>{
-    e.preventDefault();e.stopPropagation();
-    const t=e.changedTouches[0];_tid=t.identifier;
-    const{x,y}=getMMPt(t.clientX,t.clientY);
-    _mmDragVP=hitMMVP(x,y,cv.width,cv.height);
-  },{passive:false});
-  cv.addEventListener('touchmove',e=>{
-    e.preventDefault();e.stopPropagation();if(_mmDragVP<0)return;
-    const t=[...e.changedTouches].find(c=>c.identifier===_tid);if(!t)return;
-    const{x,y}=getMMPt(t.clientX,t.clientY);
-    const cp=mmToCanvas(x,y,cv.width,cv.height);
-    perspVPs[_mmDragVP]={x:cp.x,y:cp.y};
-    updatePerspCoords();drawSelOv();
-  },{passive:false});
-  cv.addEventListener('touchend',()=>{_mmDragVP=-1;},{passive:false});
-  cv.addEventListener('touchcancel',()=>{_mmDragVP=-1;},{passive:false});
-}
-function lineHitsCanvasEdge(vpx,vpy,tx,ty){
-  // Line from VP through target point T, find where it exits [0,CW]×[0,CH]
-  const dx=tx-vpx,dy=ty-vpy,len=Math.hypot(dx,dy);
-  if(len<1)return null;
-  const ux=dx/len,uy=dy/len;
-  const ts=[];
-  if(Math.abs(ux)>1e-9){ts.push((0-vpx)/ux);ts.push((CW-vpx)/ux);}
-  if(Math.abs(uy)>1e-9){ts.push((0-vpy)/uy);ts.push((CH-vpy)/uy);}
-  const valid=ts.filter(t=>{
-    if(t<=0)return false;
-    const hx=vpx+ux*t,hy=vpy+uy*t;
-    return hx>=-2&&hx<=CW+2&&hy>=-2&&hy<=CH+2;
-  });
-  if(!valid.length)return null;
-  const tmin=Math.min(...valid);
-  return{x:vpx+ux*tmin,y:vpy+uy*tmin};
-}
-function renderPerspToCanvas(){
-  const RMAX=2048;
-  const sc=Math.min(1,RMAX/Math.max(CW,CH));
-  const RW=Math.round(CW*sc),RH=Math.round(CH*sc);
-  const c=Object.assign(document.createElement('canvas'),{width:RW,height:RH});
-  const ctx=c.getContext('2d');
-  ctx.clearRect(0,0,RW,RH);
-
-  // 直線をキャンバス内でクリップして両端点を返す（parametric line clipping）
-  function clipLine(vx,vy,dirX,dirY){
-    let tmin=-1e9,tmax=1e9;
-    // Liang-Barsky: p=境界法線・方向, q=点→境界距離
-    function clip(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tmin=Math.max(tmin,t);else tmax=Math.min(tmax,t);}return true;}
-    if(!clip(-dirX, vx))return null;      // x=0 境界: q=vx (修正)
-    if(!clip( dirX, RW-vx))return null;   // x=RW 境界: q=RW-vx
-    if(!clip(-dirY, vy))return null;      // y=0 境界: q=vy (修正)
-    if(!clip( dirY, RH-vy))return null;   // y=RH 境界: q=RH-vy
-    if(tmin>tmax)return null;
-    return{x0:vx+dirX*tmin,y0:vy+dirY*tmin,x1:vx+dirX*tmax,y1:vy+dirY*tmax};
-  }
-
-  perspVPs.forEach((vp,vi)=>{
-    const vpx=vp.x*sc,vpy=vp.y*sc;
-    ctx.strokeStyle=VP_COLORS[vi];ctx.lineWidth=1.5;ctx.globalAlpha=0.7;
-    const N=perspLineCount;
-    // キャンバスの4隅に対する角度範囲を求め、N本均等分布
-    const corners=[[0,0],[RW,0],[RW,RH],[0,RH]];
-    const angles=corners.map(([cx,cy])=>Math.atan2(cy-vpy,cx-vpx));
-    let aMin=Math.min(...angles),aMax=Math.max(...angles);
-    // 角度の連続性対策: 範囲が>πなら折り返しあり
-    if(aMax-aMin>Math.PI){
-      // 折り返しケース: 最小角と最大角を入れ替え
-      const adjusted=angles.map(a=>a<0?a+Math.PI*2:a);
-      aMin=Math.min(...adjusted);aMax=Math.max(...adjusted);
-    }
-    for(let i=0;i<=N;i++){
-      const a=aMin+(aMax-aMin)*i/N;
-      const seg=clipLine(vpx,vpy,Math.cos(a),Math.sin(a));
-      if(!seg)continue;
-      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
-    }
-  });
-
-  // VP1-VP2 水平線（キャンバス内クリップ）
-  const p0x=perspVPs[0].x*sc,p0y=perspVPs[0].y*sc;
-  const p1x=perspVPs[1].x*sc,p1y=perspVPs[1].y*sc;
-  const hdx=p1x-p0x,hdy=p1y-p0y,hlen=Math.hypot(hdx,hdy);
-  if(hlen>1){
-    const seg=clipLine(p0x,p0y,hdx/hlen,hdy/hlen);
-    if(seg){
-      ctx.globalAlpha=0.9;ctx.strokeStyle='rgba(255,255,255,0.8)';ctx.lineWidth=1.5;
-      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
-    }
-  }
-  ctx.globalAlpha=1;
-  return c;
-}
-function renderPerspToRef(){
-  showToast('透視グリッドを生成中…');
-  setTimeout(()=>{
-    try{
-      const c=renderPerspToCanvas();
-      const img=new Image();
-      img.onload=()=>{
-        loadRefImage(img);
-        showToast('透視グリッドを下絵に変換しました');
-      };
-      img.src=c.toDataURL('image/png');
-    }catch(err){showToast('変換エラー: '+err.message);console.error(err);}
-  },50);
-}
-let _perspDragVP=-1;
-function hitPerspVP(sx,sy){
-  for(let i=0;i<3;i++){
-    const sp=canvasToScreen(perspVPs[i].x,perspVPs[i].y);
-    const dx=sx-sp.x,dy=sy-sp.y;
-    if(dx*dx+dy*dy<28*28)return i;
-  }
-  return-1;
-}
-function drawPerspOverlay(ctx){
-  if(subMode!=='persp')return;
-  ctx.save();
-  const W=selOv.width,H=selOv.height;
-  // スクリーン上でキャンバス矩形を求めクリップ
-  function clipLineScreen(vx,vy,dirX,dirY){
-    // selOv全体を範囲としてクリップ（スクリーン外はcanvas2Dが自動クリップ）
-    let tmin=-1e9,tmax=1e9;
-    function clip(p,q){if(Math.abs(p)<1e-12){if(q<0)return false;}else{const t=q/p;if(p<0)tmin=Math.max(tmin,t);else tmax=Math.min(tmax,t);}return true;}
-    if(!clip(-dirX, vx))return null;if(!clip(dirX,W-vx))return null;
-    if(!clip(-dirY, vy))return null;if(!clip(dirY,H-vy))return null;
-    if(tmin>tmax)return null;
-    return{x0:vx+dirX*tmin,y0:vy+dirY*tmin,x1:vx+dirX*tmax,y1:vy+dirY*tmax};
-  }
-  perspVPs.forEach((vp,vi)=>{
-    const sp=canvasToScreen(vp.x,vp.y);
-    const N=perspLineCount;
-    // キャンバスの4隅スクリーン座標
-    const corners=[[0,0],[CW,0],[CW,CH],[0,CH]].map(([cx,cy])=>canvasToScreen(cx,cy));
-    const angles=corners.map(p=>Math.atan2(p.y-sp.y,p.x-sp.x));
-    let aMin=Math.min(...angles),aMax=Math.max(...angles);
-    if(aMax-aMin>Math.PI){const adj=angles.map(a=>a<0?a+Math.PI*2:a);aMin=Math.min(...adj);aMax=Math.max(...adj);}
-    ctx.strokeStyle=VP_COLORS[vi];ctx.lineWidth=1;ctx.globalAlpha=0.4;
-    for(let i=0;i<=N;i++){
-      const a=aMin+(aMax-aMin)*i/N;
-      const seg=clipLineScreen(sp.x,sp.y,Math.cos(a),Math.sin(a));
-      if(!seg)continue;
-      ctx.beginPath();ctx.moveTo(seg.x0,seg.y0);ctx.lineTo(seg.x1,seg.y1);ctx.stroke();
-    }
-    ctx.globalAlpha=1;
-    ctx.beginPath();ctx.arc(sp.x,sp.y,10,0,Math.PI*2);
-    ctx.fillStyle=VP_COLORS[vi];ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
-    ctx.fillStyle='#fff';ctx.font='bold 9px "DM Mono",monospace';ctx.textAlign='center';ctx.textBaseline='middle';
-    ctx.fillText(['X','Y','Z'][vi],sp.x,sp.y);
-  });
-  // 水平線
-  const s0=canvasToScreen(perspVPs[0].x,perspVPs[0].y);
-  const s1=canvasToScreen(perspVPs[1].x,perspVPs[1].y);
-  ctx.strokeStyle='rgba(255,255,255,0.4)';ctx.lineWidth=1;ctx.setLineDash([8,4]);
-  ctx.beginPath();ctx.moveTo(s0.x,s0.y);ctx.lineTo(s1.x,s1.y);ctx.stroke();ctx.setLineDash([]);
-  ctx.restore();
-}
-
 // ── init ─────────────────────────────────────────────────
 (function init(){
   if(!initWebGL())return;
@@ -2557,98 +2197,6 @@ function drawPerspOverlay(ctx){
   drawStabOn('stab-cv',TOOLS.pen.stab);drawStabOn('mk-stab-cv',TOOLS.marker.stab);drawStabOn('er-stab-cv',TOOLS.eraser.stab);
   document.getElementById('sz-cur').textContent=CW+'×'+CH;
   document.querySelectorAll('.sz-opt').forEach(o=>o.classList.toggle('cur',+o.dataset.w===CW&&+o.dataset.h===CH));
-
-  // 透視VP初期化、ミニマップのアスペクト比調整
-  initPerspVPs();updatePerspCoords();
-  // ミニマップをキャンバスのアスペクト比に合わせる
-  (function(){
-    const cv=document.getElementById('vp-minimap');if(!cv)return;
-    const h=Math.round(cv.width*CH/CW);cv.height=h;cv.style.aspectRatio=CW+'/'+CH;
-  })();
-
-  // 塗りつぶしボタン
-  document.getElementById('fill-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    if(subMode==='fill'){subMode=null;document.getElementById('fill-btn').classList.remove('on');}
-    else{subMode='fill';document.getElementById('fill-btn').classList.add('on');}
-    drawSelOv();
-  });
-
-  // 下絵ボタン
-  const refBtnEl=document.getElementById('ref-btn');
-  const refPanel=document.getElementById('ref-panel');
-  refBtnEl.addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    const isOpen=refPanel.classList.contains('open');
-    document.querySelectorAll('.toppanel').forEach(p=>p.classList.remove('open'));
-    if(!isOpen)refPanel.classList.add('open');
-  });
-  document.getElementById('ref-load-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    document.getElementById('ref-file-input').click();
-  });
-  document.getElementById('ref-file-input').addEventListener('change',function(){
-    const file=this.files[0];if(!file)return;this.value='';
-    const reader=new FileReader();
-    reader.onload=ev=>{const img=new Image();img.onload=()=>{loadRefImage(img);};img.src=ev.target.result;};
-    reader.readAsDataURL(file);
-  });
-  initCsl('csl-ref-op',Math.round(refOpacity*100),v=>{refOpacity=v/100;document.getElementById('v-ref-op').textContent=v+'%';scheduleDraw();});
-  document.getElementById('ref-transform-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    if(!refImgEl){showToast('先に画像を読み込んでください');return;}
-    subMode=subMode==='ref'?null:'ref';
-    document.getElementById('ref-transform-btn').textContent=subMode==='ref'?'✓ 変形中':'↔ 変形';
-    drawSelOv();refPanel.classList.remove('open');
-  });
-  document.getElementById('ref-delete-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();deleteRefImage();refPanel.classList.remove('open');showToast('下絵を削除しました');
-  });
-
-  // 透視ボタン
-  const perspBtnEl=document.getElementById('persp-btn');
-  const perspPanel=document.getElementById('persp-panel');
-  perspBtnEl.addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    const isOpen=perspPanel.classList.contains('open');
-    document.querySelectorAll('.toppanel').forEach(p=>p.classList.remove('open'));
-    if(!isOpen){perspPanel.classList.add('open');subMode='persp';perspBtnEl.classList.add('on');}
-    else{subMode=null;perspBtnEl.classList.remove('on');}
-    drawSelOv();
-  });
-  initCsl('csl-persp-n',perspLineCount,v=>{perspLineCount=v;document.getElementById('v-persp-n').textContent=v;drawSelOv();});
-  document.getElementById('persp-reset-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();initPerspVPs();updatePerspCoords();drawSelOv();showToast('消失点をリセット');
-  });
-  document.getElementById('persp-gen-btn').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();renderPerspToRef();perspPanel.classList.remove('open');subMode=null;perspBtnEl.classList.remove('on');drawSelOv();
-  });
-  // スナップボタン
-  document.getElementById('vp-snap-h').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    // VP1とVP2を同じY（水平）にスナップ
-    const midY=(perspVPs[0].y+perspVPs[1].y)/2;
-    perspVPs[0].y=midY;perspVPs[1].y=midY;
-    updatePerspCoords();drawSelOv();showToast('VP1・VP2を水平にスナップ');
-  });
-  document.getElementById('vp-snap-v').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    // VP3をキャンバス中心X・VP1-VP2の中間Xに揃える
-    const midX=(perspVPs[0].x+perspVPs[1].x)/2;
-    perspVPs[2].x=midX;
-    updatePerspCoords();drawSelOv();showToast('VP3を垂直中心にスナップ');
-  });
-  document.getElementById('vp-snap-eq').addEventListener('pointerdown',e=>{
-    e.preventDefault();e.stopPropagation();
-    // VP1とVP2をキャンバス中心から等距離にスナップ
-    const cx=CW/2;
-    const d1=Math.abs(perspVPs[0].x-cx),d2=Math.abs(perspVPs[1].x-cx);
-    const dist=(d1+d2)/2;
-    perspVPs[0].x=cx+dist*(perspVPs[0].x>=cx?1:-1);
-    perspVPs[1].x=cx+dist*(perspVPs[1].x>=cx?1:-1);
-    updatePerspCoords();drawSelOv();showToast('VP1・VP2を均等配置にスナップ');
-  });
-  initMMEvents();
 
   // ブラシ・パレットリセット
   document.getElementById('sz-reset').addEventListener('pointerdown',e=>{
