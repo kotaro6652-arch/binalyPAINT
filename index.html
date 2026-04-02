@@ -936,6 +936,7 @@ function expandDirty(x,y,r){}  // 互換性維持
 
 // ── スナップショット（UNDOキーフレーム用） ────────────────
 function readAllLayers(){
+  // 同期版: UNDOリストア時・即時必要な場合に使用
   const layers=[];
   for(const l of gLayers){
     const raw=new Uint8Array(CW*CH);
@@ -948,12 +949,29 @@ function readAllLayers(){
     structure:gLayers.map(l=>({id:l.id,name:l.name,color:[...l.color],opacity:l.opacity,visible:l.visible,blend:l.blend})),
     activeIdx:gActiveIdx,bgColor};
 }
+// 非同期版: requestIdleCallback + Worker packBits（キーフレーム生成用）
+async function readAllLayersAsync(){
+  const structure=gLayers.map(l=>({id:l.id,name:l.name,color:[...l.color],opacity:l.opacity,visible:l.visible,blend:l.blend}));
+  const ai=gActiveIdx,bg=bgColor;
+  const layers=[];
+  for(const l of gLayers){
+    const raw=new Uint8Array(CW*CH);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
+    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    // packBitsをWorkerで非同期実行（メインスレッド解放）
+    const bits=await packBitsAsync(raw);
+    layers.push({id:l.id,bits});
+    await new Promise(r=>requestAnimationFrame(r)); // 1フレーム分ペン入力を処理
+  }
+  return{layers,structure,activeIdx:ai,bgColor:bg};
+}
 
 // ── タイムライン操作 ──────────────────────────────────────
 function _tlPush(entry){
   if(timelinePos<timeline.length-1) timeline.length=timelinePos+1;
   timeline.push(entry);timelinePos=timeline.length-1;
-  while(timeline.length>200){
+  while(timeline.length>80){ // メモリ節約: 最大80エントリ
     const i=timeline.findIndex((e,j)=>j>0&&e.type==='keyframe');
     if(i<0)break;
     timeline.splice(0,i);timelinePos=timeline.length-1;
@@ -962,11 +980,16 @@ function _tlPush(entry){
 function _insertKeyframe(){
   _strokeCount=0;
   // アイドル時間にキーフレームを作成（メインスレッドをブロックしない）
-  const doInsert=()=>{_tlPush({type:'keyframe',snap:readAllLayers()});};
+  // 非同期キーフレーム生成（Worker packBits + rAF yield）
+  const doInsert=async()=>{
+    if(penId!==null){setTimeout(doInsert,500);return;} // ペン使用中は延期
+    const snap=await readAllLayersAsync();
+    _tlPush({type:'keyframe',snap});
+  };
   if(typeof requestIdleCallback!=='undefined'){
-    requestIdleCallback(doInsert,{timeout:2000});
+    requestIdleCallback(()=>doInsert(),{timeout:3000});
   } else {
-    setTimeout(doInsert,100);
+    setTimeout(doInsert,200);
   }
 }
 
@@ -1621,7 +1644,8 @@ document.addEventListener('touchstart',function(e){
   // 定規モード
   if(rulerMode>0){snapshotBeforeStroke();if(_recStroke)_recStroke.tool='ruler';rulerStart=screenToCanvas(st.clientX,st.clientY);rulerPreviewPt={x:st.clientX,y:st.clientY};drawSelOv();return;}
   updPRC(st.clientX,st.clientY,st.force);schedulePanelAutoClose();
-  snapshotBeforeStroke(); // ペン接触の瞬間に全面読み出し（描画前・安全）
+  _startPenWatchdog();
+  snapshotBeforeStroke();
   beginStroke(st.clientX,st.clientY,st.force);
 },{passive:false,capture:true});
 document.addEventListener('touchmove',function(e){
@@ -1688,11 +1712,11 @@ document.addEventListener('touchend',function(e){
   if(subMode==='ref'){_refHandle=null;_refPrevPt=null;return;}
   if(subMode==='fill'){penId=null;return;}
   selHandle=null;selPrevPt=null;if(selState==='lasso'){drawSelOv();return;}
-  finishStroke();captureStroke();
+  _stopPenWatchdog();finishStroke();captureStroke();
 },{passive:false,capture:true});
 document.addEventListener('touchcancel',function(e){
   if(penId===null)return;
-  for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;rulerStart=null;rulerPreviewPt=null;finishStroke();captureStroke();break;}
+  for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){_stopPenWatchdog();penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;rulerStart=null;rulerPreviewPt=null;try{finishStroke();}catch(e2){}captureStroke();break;}
 },{passive:false,capture:true});
 
 // ── 指ナビ ────────────────────────────────────────────────
@@ -1783,6 +1807,7 @@ function makeDraggableBtn(el,initY,onTap){
   el.addEventListener('touchmove',function(e){if(!PD)return;e.preventDefault();const dy=e.changedTouches[0].clientY-SY;if(Math.abs(dy)>6){Mov=true;BY=Math.max(38,Math.min(window.innerHeight-38,BaseY+dy));el.style.top=BY+'px';}},{passive:false});
   el.addEventListener('touchend',function(e){if(!PD)return;e.preventDefault();e.stopPropagation();PD=false;if(!Mov)onTap();Mov=false;},{passive:false});
   el.addEventListener('touchcancel',function(){PD=false;Mov=false;},{passive:false});
+  el.addEventListener('touchend',function(e){if(!PD)return;e.preventDefault();e.stopPropagation();PD=false;if(!Mov)onTap();Mov=false;},{passive:false});
 }
 makeDraggableBtn(document.getElementById('flip-btn'),window.innerHeight*.35,()=>{flipState=!flipState;_rec({type:'flip',state:flipState});syncFlipBtn();applyView();showToast(flipState?'左右反転 ON':'反転解除');});
 const colorBtn=document.getElementById('color-btn');
@@ -2677,15 +2702,19 @@ async function buildBPFPayload(thumbDataUrl){
 // OPFSに保存（ファイル名: タイムスタンプ.bpf）
 async function saveBPFToOPFS(filename, payloadStr){
   try{
-    const dir = await opfsRoot();
-    const fh = await dir.getFileHandle(filename, {create:true});
-    const writable = await fh.createWritable();
-    await writable.write(payloadStr);
-    await writable.close();
+    // Workerで非同期保存（メインスレッドをブロックしない）
+    await saveOPFSViaWorker(filename, payloadStr);
     return true;
   } catch(e){
-    console.warn('OPFS save failed:', e);
-    return false;
+    // フォールバック: メインスレッドで保存
+    try{
+      const dir = await opfsRoot();
+      const fh = await dir.getFileHandle(filename, {create:true});
+      const writable = await fh.createWritable();
+      await writable.write(payloadStr);
+      await writable.close();
+      return true;
+    }catch(e2){console.warn('OPFS save failed:', e2);return false;}
   }
 }
 
@@ -2885,12 +2914,130 @@ async function requestWakeLock(){
 document.addEventListener('visibilitychange',async()=>{
   if(document.visibilityState==='visible'){
     await requestWakeLock();
+    // 復帰時: ゴースト状態を全てリセット
+    _resetAllInputState();
     scheduleDraw();
   } else {
-    // バックグラウンド: 描画を停止
     drawScheduled=false;
+    _resetAllInputState();
   }
 });
+
+// 全入力状態の強制リセット（長時間使用や割り込みで状態が固着した場合）
+function _resetAllInputState(){
+  if(penId!==null){try{finishStroke();}catch(e){}penId=null;}
+  ftouches.clear();maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;
+  prc.style.display='none';
+  lastDrawPt=null;stabBuf=[];_crBuf=[];instCount=0;
+  // UI状態を実際の変数と同期
+  const cb=document.getElementById('color-btn');if(cb)cb.classList.toggle('on',inkTransparent);
+  const eb=document.getElementById('erb');if(eb)eb.classList.toggle('on',eraserOn);
+  const ba=document.getElementById('badge');if(ba)ba.classList.toggle('show',eraserOn);
+}
+
+// 5秒以上ペンIDが変化しない場合は自動リセット（SafariのTouchイベント取りこぼし対策）
+let _penWatchdog=null;
+function _startPenWatchdog(){
+  clearTimeout(_penWatchdog);
+  _penWatchdog=setTimeout(()=>{
+    if(penId!==null){
+      console.warn('BinaryPaint: pen watchdog reset (stuck pen)');
+      _resetAllInputState();
+    }
+  },8000); // 8秒タッチし続けることは通常ないため強制リセット
+}
+function _stopPenWatchdog(){clearTimeout(_penWatchdog);}
+
+
+// ── ヘビー処理Worker（packBits・BPF組み立て・OPFS書き込み） ─
+const _workerCode = `
+self.onmessage = async function(e){
+  const {type, payload} = e.data;
+  if(type === 'packBits'){
+    const r8 = payload;
+    const n = r8.length, bits = new Uint8Array(Math.ceil(n/8)), full = n>>3;
+    for(let i=0;i<full;i++){const b=i<<3;bits[i]=(r8[b]?1:0)|(r8[b+1]?2:0)|(r8[b+2]?4:0)|(r8[b+3]?8:0)|(r8[b+4]?16:0)|(r8[b+5]?32:0)|(r8[b+6]?64:0)|(r8[b+7]?128:0);}
+    for(let i=full<<3;i<n;i++)if(r8[i])bits[i>>3]|=(1<<(i&7));
+    self.postMessage({type:'packBits',bits}, [bits.buffer]);
+  } else if(type === 'saveOPFS'){
+    try{
+      const {filename, payloadStr, dirName} = payload;
+      const root = await navigator.storage.getDirectory();
+      const dir = await root.getDirectoryHandle(dirName, {create:true});
+      const fh = await dir.getFileHandle(filename, {create:true});
+      // SyncAccessHandle は Worker内でのみ使用可
+      try{
+        const sh = await fh.createSyncAccessHandle();
+        const enc = new TextEncoder().encode(payloadStr);
+        sh.truncate(0);sh.write(enc,{at:0});sh.flush();sh.close();
+      }catch{
+        // フォールバック: 通常のwritable
+        const writable = await fh.createWritable();
+        await writable.write(payloadStr);
+        await writable.close();
+      }
+      self.postMessage({type:'saveOPFS',ok:true,filename});
+    }catch(err){
+      self.postMessage({type:'saveOPFS',ok:false,error:err.message});
+    }
+  } else if(type === 'buildKeyframeSnap'){
+    // packBits を各レイヤー分実行
+    const {layers} = payload;
+    const packed = layers.map(({id, r8}) => {
+      const n=r8.length,bits=new Uint8Array(Math.ceil(n/8)),full=n>>3;
+      for(let i=0;i<full;i++){const b=i<<3;bits[i]=(r8[b]?1:0)|(r8[b+1]?2:0)|(r8[b+2]?4:0)|(r8[b+3]?8:0)|(r8[b+4]?16:0)|(r8[b+5]?32:0)|(r8[b+6]?64:0)|(r8[b+7]?128:0);}
+      for(let i=full<<3;i<n;i++)if(r8[i])bits[i>>3]|=(1<<(i&7));
+      return {id, bits};
+    });
+    self.postMessage({type:'buildKeyframeSnap',packed}, packed.map(p=>p.bits.buffer));
+  }
+};
+`;
+let _worker = null;
+function getWorker(){
+  if(!_worker){
+    const blob = new Blob([_workerCode], {type:'application/javascript'});
+    _worker = new Worker(URL.createObjectURL(blob));
+    _worker.onerror = e => { console.error('Worker error:', e); _worker=null; };
+  }
+  return _worker;
+}
+
+// Worker経由 packBits（非同期）
+function packBitsAsync(r8){
+  return new Promise(resolve=>{
+    const w=getWorker();
+    const copy=new Uint8Array(r8); // transfer用コピー
+    const handler=e=>{if(e.data.type==='packBits'){w.removeEventListener('message',handler);resolve(e.data.bits);}};
+    w.addEventListener('message',handler);
+    w.postMessage({type:'packBits',payload:copy},[copy.buffer]);
+  });
+}
+
+// Worker経由 OPFS保存（非同期・メインスレッドをブロックしない）
+function saveOPFSViaWorker(filename, payloadStr){
+  return new Promise((resolve,reject)=>{
+    const w=getWorker();
+    const handler=e=>{if(e.data.type==='saveOPFS'&&e.data.filename===filename){w.removeEventListener('message',handler);if(e.data.ok)resolve(true);else reject(new Error(e.data.error));}};
+    w.addEventListener('message',handler);
+    w.postMessage({type:'saveOPFS',payload:{filename,payloadStr,dirName:'binarypaint'}});
+  });
+}
+
+// Worker経由 キーフレームsnap構築
+function buildKeyframeSnapAsync(layers){
+  return new Promise(resolve=>{
+    const w=getWorker();
+    const layerData=layers.map(l=>{
+      const r8=new Uint8Array(l._r8len||0); // 呼び出し元でr8をセット済み前提
+      return {id:l.id, r8};
+    });
+    const handler=e=>{if(e.data.type==='buildKeyframeSnap'){w.removeEventListener('message',handler);resolve(e.data.packed);}};
+    w.addEventListener('message',handler);
+    const transfers=layerData.map(d=>d.r8.buffer);
+    w.postMessage({type:'buildKeyframeSnap',payload:{layers:layerData}},transfers);
+  });
+}
 
 // ── init ─────────────────────────────────────────────────
 (function init(){
