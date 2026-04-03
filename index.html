@@ -401,6 +401,8 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="slabel">手振れ補正</div>
   <canvas class="stab-cv" id="stab-cv" width="244" height="36"></canvas>
   <div class="row"><label>強さ</label><div class="csl" id="csl-stab" data-min="0" data-max="20" data-ratio="3"></div><span class="val" id="v-stab">1</span></div>
+  <div class="slabel">輪郭ソフトネス</div>
+  <div class="row"><label>ソフト</label><div class="csl" id="csl-soft" data-min="0" data-max="100" data-ratio="5"></div><span class="val" id="v-soft">0%</span></div>
   <div class="slabel">筆圧カーブ</div>
   <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-pr" checked><div class="ttr"></div><div class="tth"></div></label></div>
   <div id="pr-sec">
@@ -416,6 +418,8 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="slabel">手振れ補正</div>
   <canvas class="stab-cv" id="mk-stab-cv" width="244" height="36"></canvas>
   <div class="row"><label>強さ</label><div class="csl" id="csl-mk-stab" data-min="0" data-max="20" data-ratio="3"></div><span class="val" id="v-mk-stab">1</span></div>
+  <div class="slabel">輪郭ソフトネス</div>
+  <div class="row"><label>ソフト</label><div class="csl" id="csl-mk-soft" data-min="0" data-max="100" data-ratio="5"></div><span class="val" id="v-mk-soft">15%</span></div>
   <div class="slabel">筆圧カーブ</div>
   <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-mk-pr"><div class="ttr"></div><div class="tth"></div></label></div>
   <div id="mk-pr-sec" style="opacity:.4">
@@ -433,6 +437,8 @@ input[type=range].native::-webkit-slider-thumb{-webkit-appearance:none;width:22p
   <div class="slabel">手振れ補正</div>
   <canvas class="stab-cv" id="er-stab-cv" width="244" height="36"></canvas>
   <div class="row"><label>強さ</label><div class="csl" id="csl-estab" data-min="1" data-max="20" data-ratio="3"></div><span class="val" id="v-estab">1</span></div>
+  <div class="slabel">輪郭ソフトネス</div>
+  <div class="row"><label>ソフト</label><div class="csl" id="csl-er-soft" data-min="0" data-max="100" data-ratio="5"></div><span class="val" id="v-er-soft">0%</span></div>
   <div class="slabel">筆圧カーブ</div>
   <div class="togrow"><span class="lbl">筆圧感知</span><label class="tog"><input type="checkbox" id="cb-er-pr"><div class="ttr"></div><div class="tth"></div></label></div>
   <div id="er-pr-sec" style="opacity:.4">
@@ -508,6 +514,8 @@ let view={x:0,y:0,scale:1,rot:0};
 let flipState=false;
 let bgColor='#ffffff';
 let bgRGB=[1,1,1];
+let inkHex='#000000';
+let inkRGBA=[0,0,0,1]; // 現在のストローク色 (RGBA 0-1)
 let screenW=window.innerWidth,screenH=window.innerHeight;
 // devicePixelRatio: canvas物理ピクセルをRetinaに対応（最大2）
 const DPR=Math.min(window.devicePixelRatio||1,2);
@@ -542,9 +550,9 @@ const DEFAULT_PTS=CURVE_X.map((x,i)=>({x,y:DEFAULT_Y[i]}));
 // thresh: この筆圧以下は常に1px（0=閾値なし）
 // TOOLS.pen/marker に thresh を追加
 const TOOLS={
-  pen:  {sz:12,min:1,pressure:true, curve:2.0,stab:1,thresh:0.05,pts:DEFAULT_PTS.map(p=>({...p}))},
-  marker:{sz:12,min:1,pressure:false,curve:2.0,stab:1,thresh:0.05,pts:DEFAULT_PTS.map(p=>({...p}))},
-  eraser:{sz:20,min:1,pressure:false,curve:2.0,stab:1,thresh:0,pts:DEFAULT_PTS.map(p=>({...p}))}
+  pen:   {sz:12,min:1,pressure:true, curve:2.0,stab:1,thresh:0.05,soft:0.0, pts:DEFAULT_PTS.map(p=>({...p}))},
+  marker:{sz:12,min:1,pressure:false,curve:2.0,stab:1,thresh:0.05,soft:0.15,pts:DEFAULT_PTS.map(p=>({...p}))},
+  eraser:{sz:20,min:1,pressure:false,curve:2.0,stab:1,thresh:0,  soft:0.0, pts:DEFAULT_PTS.map(p=>({...p}))}
 };
 let activeTool='pen';
 let bSize=12,bMin=1,bPressure=true,bCurve=2.0,stabLen=1,eSize=20,eMin=1,eStab=1,ePressure=false,eThresh=0,bThresh=0.05;
@@ -641,15 +649,28 @@ uniform vec2 u_res;
 out vec2 v_uv;
 void main(){v_uv=a_quad*.5+.5;vec2 px=a_inst.xy+a_quad*a_inst.z;vec2 clip=px/u_res*2.-1.;gl_Position=vec4(clip.x,-clip.y,0,1);}`;
 const BRUSH_FS=`#version 300 es
-precision highp float;in vec2 v_uv;uniform float u_val;out float o;
-void main(){if(length(v_uv-0.5)*2.0>1.0)discard;o=u_val;}`;
+precision highp float;
+in vec2 v_uv;
+uniform vec4 u_inkColor;   // ストローク色 RGBA
+uniform float u_softness;  // 0=ハード, 1=ソフト
+uniform bool u_erase;
+out vec4 o;
+void main(){
+  float d=length(v_uv-vec2(0.5))*2.0;
+  if(d>1.0)discard;
+  float edge=max(0.005,1.0-u_softness*0.97);
+  float alpha=1.0-smoothstep(edge,1.0,d);
+  if(alpha<0.004)discard;
+  if(u_erase){o=vec4(0.0,0.0,0.0,alpha);}  // 消しゴム: alpha のみ書き込み
+  else{o=vec4(u_inkColor.rgb,u_inkColor.a*alpha);}
+}`;
 const QUAD_VS=`#version 300 es
 layout(location=0) in vec2 a_pos;out vec2 v_uv;
 void main(){v_uv=a_pos*.5+.5;gl_Position=vec4(a_pos,0,1);}`;
 const COMP_FS=`#version 300 es
 precision highp float;
 in vec2 v_uv;
-uniform sampler2D u_layer;uniform vec3 u_color;uniform float u_opacity;uniform int u_blend;
+uniform sampler2D u_layer;uniform float u_opacity;uniform int u_blend;
 uniform sampler2D u_base;uniform bool u_first;uniform vec3 u_bg;
 uniform vec2 u_screen;uniform vec2 u_canvas;uniform vec2 u_vxy;
 uniform float u_vscale;uniform bool u_flip;uniform float u_vrot;
@@ -665,11 +686,13 @@ void main(){
   float tu=cx/u_canvas.x;float tv=1.0-cy/u_canvas.y;
   if(tu<0.0||tu>1.0||tv<0.0||tv>1.0){o=vec4(0.067,0.067,0.075,1);return;}
   vec3 base=u_first?u_bg:texture(u_base,v_uv).rgb;
-  float ink=texture(u_layer,vec2(tu,tv)).r*u_opacity;
+  vec4 lsmp=texture(u_layer,vec2(tu,tv));
+  float ink=lsmp.a*u_opacity;
+  vec3 lrgb=lsmp.rgb;
   vec3 rgb;
-  if(u_blend==1){rgb=mix(base,base*u_color,ink);}
-  else if(u_blend==2){vec3 ov=mix(2.*base*u_color,1.-2.*(1.-base)*(1.-u_color),step(.5,base));rgb=mix(base,ov,ink);}
-  else{rgb=mix(base,u_color,ink);}
+  if(u_blend==1){rgb=mix(base,base*lrgb,ink);}
+  else if(u_blend==2){vec3 ov=mix(2.*base*lrgb,1.-2.*(1.-base)*(1.-lrgb),step(.5,base));rgb=mix(base,ov,ink);}
+  else{rgb=mix(base,lrgb,ink);}
   o=vec4(rgb,1);
 }`;
 const BLIT_FS=`#version 300 es
@@ -719,10 +742,11 @@ let compA_tex=null,compA_fbo=null,compB_tex=null,compB_fbo=null;
 let gLayers=[],gActiveIdx=0;
 
 function makeR8Texture(w,h){
+  // レイヤーはフルカラーRGBA8を使用
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.R8,w,h,0,gl.RED,gl.UNSIGNED_BYTE,null);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA8,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
   return t;
@@ -773,10 +797,26 @@ function flushBrush(){
   const layer=gLayers[gActiveIdx];
   gl.bindBuffer(gl.ARRAY_BUFFER,instBuf);gl.bufferSubData(gl.ARRAY_BUFFER,0,instArr,0,instCount*3);
   gl.bindFramebuffer(gl.FRAMEBUFFER,layer.fbo);gl.viewport(0,0,CW,CH);
-  gl.disable(gl.BLEND);gl.useProgram(PROG.brush);
+  gl.useProgram(PROG.brush);
   gl.uniform2f(ul(PROG.brush,'u_res'),CW,CH);
-  gl.uniform1f(ul(PROG.brush,'u_val'),(eraserOn||inkTransparent)?0.0:1.0);
+  // ソフトネス (ツール別)
+  const soft=eraserOn?TOOLS.eraser.soft:(activeTool==='marker'?TOOLS.marker.soft:TOOLS.pen.soft);
+  gl.uniform1f(ul(PROG.brush,'u_softness'),soft||0);
+  if(eraserOn||inkTransparent){
+    // 消しゴム: alpha を削減するブレンド
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ZERO,gl.ONE,gl.ZERO,gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform4f(ul(PROG.brush,'u_inkColor'),0,0,0,1);
+    gl.uniform1i(ul(PROG.brush,'u_erase'),1);
+  } else {
+    // 通常描画: ストローク色でアルファ合成
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform4fv(ul(PROG.brush,'u_inkColor'),inkRGBA);
+    gl.uniform1i(ul(PROG.brush,'u_erase'),0);
+  }
   gl.bindVertexArray(brushVAO);gl.drawArraysInstanced(gl.TRIANGLES,0,6,instCount);gl.bindVertexArray(null);
+  gl.disable(gl.BLEND);
   gl.bindFramebuffer(gl.FRAMEBUFFER,null);instCount=0;scheduleDraw();
 }
 function scheduleMipmap(layer){}
@@ -805,12 +845,13 @@ function scheduleDraw(){
 let _compU=null;
 function initCompUniforms(){
   const p=PROG.comp;
-  _compU={layer:gl.getUniformLocation(p,'u_layer'),color:gl.getUniformLocation(p,'u_color'),opacity:gl.getUniformLocation(p,'u_opacity'),blend:gl.getUniformLocation(p,'u_blend'),base:gl.getUniformLocation(p,'u_base'),first:gl.getUniformLocation(p,'u_first'),bg:gl.getUniformLocation(p,'u_bg'),screen:gl.getUniformLocation(p,'u_screen'),canvas:gl.getUniformLocation(p,'u_canvas'),vxy:gl.getUniformLocation(p,'u_vxy'),vscale:gl.getUniformLocation(p,'u_vscale'),flip:gl.getUniformLocation(p,'u_flip'),vrot:gl.getUniformLocation(p,'u_vrot')};
+  _compU={layer:gl.getUniformLocation(p,'u_layer'),opacity:gl.getUniformLocation(p,'u_opacity'),blend:gl.getUniformLocation(p,'u_blend'),base:gl.getUniformLocation(p,'u_base'),first:gl.getUniformLocation(p,'u_first'),bg:gl.getUniformLocation(p,'u_bg'),screen:gl.getUniformLocation(p,'u_screen'),canvas:gl.getUniformLocation(p,'u_canvas'),vxy:gl.getUniformLocation(p,'u_vxy'),vscale:gl.getUniformLocation(p,'u_vscale'),flip:gl.getUniformLocation(p,'u_flip'),vrot:gl.getUniformLocation(p,'u_vrot')};
 }
 function setCompUniforms(p,layerTex,color,opacity,blend,baseTex,isFirst,vrot){
   const u=_compU;gl.useProgram(p);
   gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,layerTex);gl.uniform1i(u.layer,0);
-  gl.uniform3fv(u.color,color);gl.uniform1f(u.opacity,opacity);
+  // u_color removed (color is baked into RGBA texture)
+  gl.uniform1f(u.opacity,opacity);
   gl.uniform1i(u.blend,{normal:0,multiply:1,overlay:2}[blend]||0);
   gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,baseTex||layerTex);gl.uniform1i(u.base,1);
   gl.uniform1i(u.first,isFirst?1:0);gl.uniform3fv(u.bg,bgRGB);
@@ -856,7 +897,7 @@ function compositeAndDisplay(){
     const l=visible[i];const isLast=i===visible.length-1;
     if(isLast){gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.viewport(0,0,glW,glH);}
     else{gl.bindFramebuffer(gl.FRAMEBUFFER,dstFBO);gl.viewport(0,0,glW,glH);}
-    setCompUniforms(PROG.comp,l.tex,l.color,l.opacity,l.blend,first?null:srcTex,first);
+    setCompUniforms(PROG.comp,l.tex,null,l.opacity,l.blend,first?null:srcTex,first);
     gl.bindVertexArray(quadVAO);gl.drawArrays(gl.TRIANGLES,0,6);gl.bindVertexArray(null);
     if(!isLast){[srcTex,dstTex]=[dstTex,srcTex];[srcFBO,dstFBO]=[dstFBO,srcFBO];first=false;}
   }
@@ -937,9 +978,9 @@ function readAllLayers(){
   // 同期版: UNDOリストア時・即時必要な場合に使用
   const layers=[];
   for(const l of gLayers){
-    const raw=new Uint8Array(CW*CH);
+    const raw=new Uint8Array(CW*CH*4);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
+    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     layers.push({id:l.id,bits:packBits(raw)});
   }
@@ -953,9 +994,9 @@ async function readAllLayersAsync(){
   const ai=gActiveIdx,bg=bgColor;
   const layers=[];
   for(const l of gLayers){
-    const raw=new Uint8Array(CW*CH);
+    const raw=new Uint8Array(CW*CH*4);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,raw);
+    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,raw);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     // packBitsをWorkerで非同期実行（メインスレッド解放）
     const bits=await packBitsAsync(raw);
@@ -1044,6 +1085,7 @@ function captureNow(label){
 function _replayStroke(s,scW,scH){
   const li=gLayers.findIndex(l=>l.id===s.layerId);if(li<0)return;
   gActiveIdx=li;eraserOn=s.eraserOn;inkTransparent=s.inkTransparent;
+  if(!s.eraserOn&&s.layerColor){inkRGBA=[s.layerColor[0],s.layerColor[1],s.layerColor[2],1];}
   const tw=scW||CW,th=scH||CH,sc=Math.max(tw,th);
   const dp=s.points.map(p=>({x:p[0]*tw,y:p[1]*th,d:p[2]*sc}));
   if(!dp.length)return;
@@ -1068,23 +1110,27 @@ function _replayStroke(s,scW,scH){
 
 function _replayFill(ev){
   const li=gLayers.findIndex(l=>l.id===ev.layerId);if(li<0)return;
-  gActiveIdx=li;
-  const l=gLayers[li];
+  gActiveIdx=li;const l=gLayers[li];
   const cx=Math.round(ev.x*CW),cy=Math.round(ev.y*CH);
   if(cx<0||cx>=CW||cy<0||cy>=CH)return;
-  const fillVal=ev.eraserOn?0:255;
-  const r8=readR8Full(l);
-  const glR=CH-1-cy;const tgt=r8[glR*CW+cx];if(tgt===fillVal)return;
+  const rgba=readR8Full(l);
+  const glR=CH-1-cy;const oi=(glR*CW+cx)*4;
+  const tgtR=rgba[oi],tgtG=rgba[oi+1],tgtB=rgba[oi+2],tgtA=rgba[oi+3];
+  const col=ev.layerColor||inkRGBA;
+  const[fr,fg,fb,fa]=ev.eraserOn?[0,0,0,0]:[Math.round(col[0]*255),Math.round(col[1]*255),Math.round(col[2]*255),255];
+  if(tgtR===fr&&tgtG===fg&&tgtB===fb&&tgtA===fa)return;
   const visited=new Uint8Array(CW*CH);const stk=[cx,cy];visited[glR*CW+cx]=1;
   while(stk.length>0){
-    const py=stk.pop(),px=stk.pop();const gr=CH-1-py;r8[gr*CW+px]=fillVal;
+    const py=stk.pop(),px=stk.pop();const gr=CH-1-py;const pi=(gr*CW+px)*4;
+    rgba[pi]=fr;rgba[pi+1]=fg;rgba[pi+2]=fb;rgba[pi+3]=fa;
     for(const[nx,ny]of[[px-1,py],[px+1,py],[px,py-1],[px,py+1]]){
       if(nx<0||nx>=CW||ny<0||ny>=CH)continue;
-      const ni=(CH-1-ny)*CW+nx;if(visited[ni]||r8[ni]!==tgt)continue;
+      const ni=(CH-1-ny)*CW+nx;if(visited[ni])continue;
+      const noi=ni*4;if(rgba[noi]!==tgtR||rgba[noi+1]!==tgtG||rgba[noi+2]!==tgtB||rgba[noi+3]!==tgtA)continue;
       visited[ni]=1;stk.push(nx,ny);
     }
   }
-  writeR8Full(l,r8);
+  writeR8Full(l,rgba);
 }
 
 function _replayLayerProp(ev){
@@ -1137,7 +1183,7 @@ function _restoreKeyframeSnap(snap){
   if(snap.layers){snap.layers.forEach(s=>{
     const l=gLayers.find(x=>x.id===s.id);if(!l)return;
     const r8=unpackBits(s.bits,n);
-    gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+    gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
   });}
 }
 
@@ -1340,7 +1386,7 @@ function hexToRGBint(hex){return[parseInt(hex.slice(1,3),16),parseInt(hex.slice(
 function rgb01ToHex(c){return'#'+c.map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');}
 function addGLLayer(name,hexColor){
   const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
-  gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
   const col=hexToRGB01(hexColor||'#000000');
   const l={id:(Date.now()*1000+Math.random()*999)|0,name,color:col,opacity:1,visible:true,blend:'normal',tex,fbo};
   gLayers.push(l);gActiveIdx=gLayers.length-1;return l;
@@ -1414,7 +1460,7 @@ function debouncedUpdateThumbs(){
       gl.bindFramebuffer(gl.FRAMEBUFFER,thumbFBO);gl.viewport(0,0,TSIZE,TSIZE);gl.disable(gl.BLEND);
       gl.useProgram(PROG.comp);
       gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_layer'),0);
-      gl.uniform3fv(ul(PROG.comp,'u_color'),l.color);gl.uniform1f(ul(PROG.comp,'u_opacity'),1.0);gl.uniform1i(ul(PROG.comp,'u_blend'),0);
+      gl.uniform1f(ul(PROG.comp,'u_opacity'),1.0);gl.uniform1i(ul(PROG.comp,'u_blend'),0);
       gl.activeTexture(gl.TEXTURE1);gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.uniform1i(ul(PROG.comp,'u_base'),1);
       gl.uniform1i(ul(PROG.comp,'u_first'),1);gl.uniform3fv(ul(PROG.comp,'u_bg'),bgRGB);
       const ts=Math.min(TSIZE/CW,TSIZE/CH),ox=(TSIZE-CW*ts)/2,oy=(TSIZE-CH*ts)/2;
@@ -1505,8 +1551,8 @@ function drawTriTex(ctx,src,srcW,srcH,x0,y0,x1,y1,x2,y2,u0,v0,u1,v1,u2,v2){
 }
 function drawMeshWarp(ctx,src,srcW,srcH,coordFn){const cw=srcW/4,ch=srcH/4;for(let row=0;row<4;row++)for(let col=0;col<4;col++){const p00=coordFn(row,col),p10=coordFn(row,col+1),p01=coordFn(row+1,col),p11=coordFn(row+1,col+1);const u0=col*cw,u1=(col+1)*cw,v0=row*ch,v1=(row+1)*ch;drawTriTex(ctx,src,srcW,srcH,p00.x,p00.y,p10.x,p10.y,p01.x,p01.y,u0,v0,u1,v0,u0,v1);drawTriTex(ctx,src,srcW,srcH,p10.x,p10.y,p11.x,p11.y,p01.x,p01.y,u1,v0,u1,v1,u0,v1);}}
 function setSelState(s){selState=s;const btn=document.getElementById('sel-btn');btn.className='leftbtn';if(s==='lasso'){btn.classList.add('lasso');setSelHint('なげなわで範囲を描いてください');}else if(s==='transform'){btn.classList.add('transform');setSelHint('ハンドル/メッシュ点で変形 → 再タップで確定');}else setSelHint(null);drawSelOv();}
-function readR8Full(l){const buf=new Uint8Array(CW*CH);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,buf);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);return buf;}
-function writeR8Full(l,r8){gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);scheduleDraw();}
+function readR8Full(l){const buf=new Uint8Array(CW*CH*4);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,buf);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);return buf;}
+function writeR8Full(l,rgba){gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);gl.bindTexture(gl.TEXTURE_2D,null);scheduleDraw();}
 async function execLasso(){
   const l=gLayers[gActiveIdx];if(!l||lassoPath.length<3){lassoPath=[];setSelState(null);return;}
   captureNow();
@@ -1814,7 +1860,16 @@ function makeDraggableBtn(el,initY,onTap){
 }
 makeDraggableBtn(document.getElementById('flip-btn'),window.innerHeight*.35,()=>{flipState=!flipState;_rec({type:'flip',state:flipState});syncFlipBtn();applyView();showToast(flipState?'左右反転 ON':'反転解除');});
 const colorBtn=document.getElementById('color-btn');
-makeDraggableBtn(colorBtn,window.innerHeight*.80,()=>{inkTransparent=!inkTransparent;colorBtn.classList.toggle('on',inkTransparent);showToast(inkTransparent?'透明描画 ON':'通常色に戻しました');});
+makeDraggableBtn(colorBtn,window.innerHeight*.80,()=>{
+  openColorPicker(inkHex,(hex)=>{
+    inkHex=hex;const[r,g,b]=hexToRGB01(hex);inkRGBA=[r,g,b,1];
+    colorBtn.querySelector('.lbtn-lbl').textContent='COLOR';
+    colorBtn.style.borderColor=hex;
+    colorBtn.style.background='';
+  });
+});
+// inkColor初期化
+(function(){const[r,g,b]=hexToRGB01(inkHex);inkRGBA=[r,g,b,1];})();
 const erb=document.getElementById('erb'),badge=document.getElementById('badge');
 makeDraggableBtn(erb,window.innerHeight*.50,()=>{if(erbMode==='toggle'){eraserOn=!eraserOn;erb.classList.toggle('on',eraserOn);badge.classList.toggle('show',eraserOn);showToast(eraserOn?'消しゴム ON':'ペン モード');}});
 erb.addEventListener('touchstart',e=>{if(erbMode==='hold'){eraserOn=true;erb.classList.add('on');badge.classList.add('show');}},{passive:true});
@@ -1963,13 +2018,14 @@ function renderLayers(){
       if(i===0){showToast('最下層のため結合できません');return;}
       const upper=gLayers[i],lower=gLayers[i-1];
       // WebGLでupper→lower に合成（upper上にblend）
-      const r8upper=new Uint8Array(CW*CH),r8lower=new Uint8Array(CW*CH);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,upper.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8upper);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,lower.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8lower);
+      const r8upper=new Uint8Array(CW*CH*4),r8lower=new Uint8Array(CW*CH);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,upper.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8upper);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,lower.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8lower);
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
       // 単純合成: upper!=0 ならその値を使用、なければlower
-      for(let p=0;p<r8upper.length;p++){if(r8upper[p])r8lower[p]=r8upper[p];}
-      gl.bindTexture(gl.TEXTURE_2D,lower.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8lower);gl.bindTexture(gl.TEXTURE_2D,null);
+      // RGBA合成: upper のアルファを使って lower に上書き
+      for(let p=0;p<CW*CH;p++){const o=p*4;if(r8upper[o+3]>0){r8lower[o]=r8upper[o];r8lower[o+1]=r8upper[o+1];r8lower[o+2]=r8upper[o+2];r8lower[o+3]=r8upper[o+3];}}
+      gl.bindTexture(gl.TEXTURE_2D,lower.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8lower);gl.bindTexture(gl.TEXTURE_2D,null);
       // upperレイヤーを削除
       const uid=upper.id;
       gl.deleteTexture(upper.tex);gl.deleteFramebuffer(upper.fbo);gLayers.splice(i,1);
@@ -2029,20 +2085,21 @@ szConfirm.addEventListener('pointerdown',async e=>{
   const oldCW=CW,oldCH=CH,{w,h}=pendingSize;showToast('変換中…');
   const scaledLayers=[];
   for(const l of gLayers){
-    const r8old=new Uint8Array(oldCW*oldCH);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,oldCW,oldCH,gl.RED,gl.UNSIGNED_BYTE,r8old);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const r8old=new Uint8Array(oldCW*oldCH*4);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,oldCW,oldCH,gl.RGBA,gl.UNSIGNED_BYTE,r8old);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     const srcC=_mkC(oldCW,oldCH);const srcCtx=srcC.getContext('2d');
+    // RGBA: テクスチャを正しくY反転してCanvas2Dに転送
     const rgba=new Uint8ClampedArray(oldCW*oldCH*4);
-    for(let row=0;row<oldCH;row++){const fr=oldCH-1-row;for(let col=0;col<oldCW;col++){const v=r8old[fr*oldCW+col];const oi=(row*oldCW+col)*4;rgba[oi]=v;rgba[oi+1]=v;rgba[oi+2]=v;rgba[oi+3]=v;}}
+    for(let row=0;row<oldCH;row++){const fr=oldCH-1-row;for(let col=0;col<oldCW;col++){const oi=(row*oldCW+col)*4,si=(fr*oldCW+col)*4;rgba[oi]=r8old[si];rgba[oi+1]=r8old[si+1];rgba[oi+2]=r8old[si+2];rgba[oi+3]=r8old[si+3];}}
     srcCtx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer),oldCW,oldCH),0,0);
     const dstC=_mkC(w,h);const dstCtx=dstC.getContext('2d');
-    dstCtx.imageSmoothingEnabled=false;dstCtx.drawImage(srcC,0,0,w,h);
-    const di=dstCtx.getImageData(0,0,w,h);const r8new=new Uint8Array(w*h);
-    for(let row=0;row<h;row++){const fr=h-1-row;for(let col=0;col<w;col++)r8new[fr*w+col]=di.data[(row*w+col)*4+3]>127?255:0;}
+    dstCtx.imageSmoothingEnabled=true;dstCtx.drawImage(srcC,0,0,w,h);
+    const di=dstCtx.getImageData(0,0,w,h);const r8new=new Uint8Array(w*h*4);
+    for(let row=0;row<h;row++){const fr=h-1-row;for(let col=0;col<w;col++){const oi=(fr*w+col)*4,si=(row*w+col)*4;r8new[oi]=di.data[si];r8new[oi+1]=di.data[si+1];r8new[oi+2]=di.data[si+2];r8new[oi+3]=di.data[si+3];}}
     scaledLayers.push({ref:l,r8new});await new Promise(r=>setTimeout(r,0));
   }
   CW=w;CH=h;timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;
-  for(const{ref,r8new}of scaledLayers){const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(ref.tex);gl.deleteFramebuffer(ref.fbo);ref.tex=nt;ref.fbo=nf;}
+  for(const{ref,r8new}of scaledLayers){const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);gl.deleteTexture(ref.tex);gl.deleteFramebuffer(ref.fbo);ref.tex=nt;ref.fbo=nf;}
   resetView();renderLayers();
   document.getElementById('sz-cur').textContent=CW+'×'+CH;szPanel.classList.remove('open');
   setTimeout(()=>{lastCaptureTime=0;captureNow('canvas_resize');showToast(`${CW}×${CH} に変換完了`);},0);
@@ -2076,7 +2133,7 @@ document.getElementById('file-input').addEventListener('change',function(){
       const lum=a<128?255:(0.299*r+0.587*g+0.114*b);
       r8[fboRow*CW+col]=lum<128?255:0;
     }}
-    gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+    gl.bindTexture(gl.TEXTURE_2D,l.tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
     scheduleDraw();setTimeout(captureNow,0);showToast('画像を読み込みました');
   };img.src=ev.target.result;};reader.readAsDataURL(file);
 });
@@ -2097,8 +2154,8 @@ document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
   // 各レイヤーをボトムアップで合成
   for(const l of gLayers){
     if(!l.visible)continue;
-    const r8=new Uint8Array(CW*CH);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const r8=new Uint8Array(CW*CH*4);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     const rgba=new Uint8ClampedArray(CW*CH*4);
     const[ir,ig,ib]=[Math.round(l.color[0]*255),Math.round(l.color[1]*255),Math.round(l.color[2]*255)];
     for(let row=0;row<CH;row++){const srcRow=CH-1-row;for(let col=0;col<CW;col++){
@@ -2142,11 +2199,12 @@ function loadBPFFile(file){
         await new Promise(resolve=>{
           const img=new Image();img.onload=()=>{
             const tc=_mkC(CW,CH);const tctx=tc.getContext('2d');tctx.drawImage(img,0,0);
-            const id=tctx.getImageData(0,0,CW,CH);const r8=new Uint8Array(CW*CH);
-            for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++)r8[fr*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
+            // RGBA: PNGからRGBA全チャンネルを読み込み
+          const id=tctx.getImageData(0,0,CW,CH);const rgba=new Uint8Array(CW*CH*4);
+            for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++){const si=(row*CW+col)*4,di=(fr*CW+col)*4;rgba[di]=id.data[si];rgba[di+1]=id.data[si+1];rgba[di+2]=id.data[si+2];rgba[di+3]=id.data[si+3];}}
             const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
-            gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-            gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+            gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+            gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);gl.bindTexture(gl.TEXTURE_2D,null);
             gLayers.push({id:lm.id||(Date.now()*1000+i),name:lm.name||('Layer '+(i+1)),color:lm.color||[0,0,0],opacity:lm.opacity??1,visible:lm.visible??true,blend:lm.blend||'normal',tex,fbo});
             resolve();
           };img.src='data:image/png;base64,'+pngB64;
@@ -2167,8 +2225,8 @@ document.getElementById('sv-psd').addEventListener('pointerdown',async e=>{
   try{
     const layersData=[];
     for(const l of gLayers){
-      const r8=new Uint8Array(CW*CH);
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+      const r8=new Uint8Array(CW*CH*4);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
       layersData.push({r8,color:l.color,opacity:l.opacity,name:l.name,blend:l.blend,visible:l.visible});
       await new Promise(r=>setTimeout(r,0));
     }
@@ -2202,7 +2260,7 @@ function loadPSDFile(file){
         const hexColor='#'+(ir.toString(16).padStart(2,'0'))+(ig.toString(16).padStart(2,'0'))+(ib.toString(16).padStart(2,'0'));
         const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
         gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-        if(alpha){const r8=new Uint8Array(CW*CH);for(let i=0;i<alpha.length;i++)r8[i]=alpha[i]>127?255:0;gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);}
+        if(alpha){const r8=new Uint8Array(CW*CH);for(let i=0;i<alpha.length;i++)r8[i]=alpha[i]>127?255:0;gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);}
         gLayers.push({id:(Date.now()*1000+Math.random()*999)|0,name:rec.name,color:hexToRGB01(hexColor),opacity:rec.opacity,visible:rec.visible,blend:rec.blendMode,tex,fbo});
       });
       gActiveIdx=0;fitView();renderLayers();scheduleDraw();setTimeout(captureNow,0);showToast('PSD読み込み完了 ('+records.length+'レイヤー)');
@@ -2508,6 +2566,7 @@ function spActivateTool(slotIdx){
       _setCslValue('csl-sz',bSize);document.getElementById('v-sz').textContent=bSize+'px';
       _setCslValue('csl-msz',bMin);document.getElementById('v-msz').textContent=bMin+'px';
       _setCslValue('csl-stab',stabLen);document.getElementById('v-stab').textContent=stabLen===0?'OFF':stabLen;
+      _setCslValue('csl-soft',Math.round(TOOLS.pen.soft*100));document.getElementById('v-soft').textContent=Math.round(TOOLS.pen.soft*100)+'%';
       _setCslValue('csl-thr',Math.round(bThresh*100));document.getElementById('v-thr').textContent=Math.round(bThresh*100)+'%';
       const cbPr=document.getElementById('cb-pr');if(cbPr)cbPr.checked=bPressure;
       const prSec=document.getElementById('pr-sec');if(prSec)prSec.style.opacity=bPressure?'1':'0.4';
@@ -2517,6 +2576,7 @@ function spActivateTool(slotIdx){
       _setCslValue('csl-mk-sz',bSize);document.getElementById('v-mk-sz').textContent=bSize+'px';
       _setCslValue('csl-mk-msz',bMin);document.getElementById('v-mk-msz').textContent=bMin+'px';
       _setCslValue('csl-mk-stab',stabLen);document.getElementById('v-mk-stab').textContent=stabLen===0?'OFF':stabLen;
+      _setCslValue('csl-mk-soft',Math.round(TOOLS.marker.soft*100));document.getElementById('v-mk-soft').textContent=Math.round(TOOLS.marker.soft*100)+'%';
       _setCslValue('csl-mk-thr',Math.round(bThresh*100));document.getElementById('v-mk-thr').textContent=Math.round(bThresh*100)+'%';
       const cbMk=document.getElementById('cb-mk-pr');if(cbMk)cbMk.checked=bPressure;
       const mkPrSec=document.getElementById('mk-pr-sec');if(mkPrSec)mkPrSec.style.opacity=bPressure?'1':'0.4';
@@ -2544,8 +2604,8 @@ async function rotateCanvas90CW(){
   const newW=CH,newH=CW; // swap
   const rotatedLayers=[];
   for(const l of gLayers){
-    const r8=new Uint8Array(CW*CH);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    const r8=new Uint8Array(CW*CH*4);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     // 90°CW回転 (GL座標 y=0=bottom)
     // 検証済み公式: r8new[ny*newW+nx] = r8[nx*CW+(CW-1-ny)]
     // where newW=CH(old height), newH=CW(old width)
@@ -2561,7 +2621,7 @@ async function rotateCanvas90CW(){
   for(const{l,r8new}of rotatedLayers){
     const nt=makeR8Texture(CW,CH),nf=makeFBO(nt);
     gl.bindFramebuffer(gl.FRAMEBUFFER,nf);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-    gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);
+    gl.bindTexture(gl.TEXTURE_2D,nt);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8new);gl.bindTexture(gl.TEXTURE_2D,null);
     gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);l.tex=nt;l.fbo=nf;
   }
   document.getElementById('sz-cur').textContent=CW+'×'+CH;
@@ -2706,7 +2766,7 @@ async function genThumb(){
     if(!l.visible) continue;
     const r8 = new Uint8Array(CW*CH);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     const col = l.color;
     const r=Math.round(col[0]*255),g=Math.round(col[1]*255),b=Math.round(col[2]*255);
@@ -2742,7 +2802,7 @@ async function buildBPFPayload(thumbDataUrl){
     const l = gLayers[i];
     const r8 = new Uint8Array(CW*CH);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);
-    gl.readPixels(0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);
+    gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
     const rgba = new Uint8ClampedArray(CW*CH*4);
     for(let row=0;row<CH;row++){const sr=CH-1-row;for(let col=0;col<CW;col++){const oi=(row*CW+col)*4;rgba[oi+3]=r8[sr*CW+col];}}
@@ -2835,7 +2895,7 @@ async function applyBPFPayload(payloadStr){
           for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++)r8[fr*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
           const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
           gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearBufferfv(gl.COLOR,0,[0]);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-          gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RED,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+          gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
           gLayers.push({id:lm.id||(Date.now()*1000+i),name:lm.name||('Layer '+(i+1)),color:lm.color||[0,0,0],opacity:lm.opacity??1,visible:lm.visible??true,blend:lm.blend||'normal',tex,fbo});
           resolve();
         };
@@ -3159,6 +3219,7 @@ function buildKeyframeSnapAsync(layers){
   initCsl('csl-sz',TOOLS.pen.sz,v=>{TOOLS.pen.sz=v;if(activeTool==='pen')bSize=v;document.getElementById('v-sz').textContent=v+'px';drawPen();});
   initCsl('csl-msz',TOOLS.pen.min,v=>{TOOLS.pen.min=v;if(activeTool==='pen')bMin=v;document.getElementById('v-msz').textContent=v+'px';drawPen();});
   initCsl('csl-stab',TOOLS.pen.stab,v=>{TOOLS.pen.stab=v;if(activeTool==='pen')stabLen=v;document.getElementById('v-stab').textContent=v===0?'OFF':v;drawStabOn('stab-cv',v);});
+  initCsl('csl-soft',Math.round((TOOLS.pen.soft||0)*100),v=>{TOOLS.pen.soft=v/100;document.getElementById('v-soft').textContent=v+'%';});
   initCsl('csl-esz',eSize,v=>{eSize=v;document.getElementById('v-esz').textContent=v+'px';});
   initCsl('csl-thr',Math.round((TOOLS.pen.thresh||0)*100),v=>{TOOLS.pen.thresh=v/100;if(activeTool==='pen')bThresh=TOOLS.pen.thresh;document.getElementById('v-thr').textContent=v+'%';drawPen();});
   document.getElementById('cb-pr').checked=TOOLS.pen.pressure;
@@ -3174,6 +3235,7 @@ function buildKeyframeSnapAsync(layers){
   initCsl('csl-mk-sz',TOOLS.marker.sz,v=>{TOOLS.marker.sz=v;if(activeTool==='marker')bSize=v;document.getElementById('v-mk-sz').textContent=v+'px';drawMk();});
   initCsl('csl-mk-msz',TOOLS.marker.min,v=>{TOOLS.marker.min=v;if(activeTool==='marker')bMin=v;document.getElementById('v-mk-msz').textContent=v+'px';drawMk();});
   initCsl('csl-mk-stab',TOOLS.marker.stab,v=>{TOOLS.marker.stab=v;if(activeTool==='marker')stabLen=v;document.getElementById('v-mk-stab').textContent=v;drawStabOn('mk-stab-cv',v);});
+  initCsl('csl-mk-soft',Math.round((TOOLS.marker.soft||0.15)*100),v=>{TOOLS.marker.soft=v/100;document.getElementById('v-mk-soft').textContent=v+'%';});
   initCsl('csl-mk-thr',Math.round((TOOLS.marker.thresh||0)*100),v=>{TOOLS.marker.thresh=v/100;if(activeTool==='marker')bThresh=TOOLS.marker.thresh;document.getElementById('v-mk-thr').textContent=v+'%';drawMk();});
   document.getElementById('cb-mk-pr').checked=TOOLS.marker.pressure;
   document.getElementById('cb-mk-pr').addEventListener('change',e=>{TOOLS.marker.pressure=e.target.checked;if(activeTool==='marker')bPressure=e.target.checked;document.getElementById('mk-pr-sec').style.opacity=e.target.checked?'1':'0.4';drawMk();});
@@ -3192,6 +3254,7 @@ function buildKeyframeSnapAsync(layers){
   initCsl('csl-esz',TOOLS.eraser.sz,v=>{TOOLS.eraser.sz=v;eSize=v;document.getElementById('v-esz').textContent=v+'px';drawEr();});
   initCsl('csl-emsz',TOOLS.eraser.min,v=>{TOOLS.eraser.min=v;eMin=v;document.getElementById('v-emsz').textContent=v+'px';drawEr();});
   initCsl('csl-estab',TOOLS.eraser.stab,v=>{TOOLS.eraser.stab=v;eStab=v;document.getElementById('v-estab').textContent=v;drawStabOn('er-stab-cv',v);});
+  initCsl('csl-er-soft',Math.round((TOOLS.eraser.soft||0)*100),v=>{TOOLS.eraser.soft=v/100;document.getElementById('v-er-soft').textContent=v+'%';});
   initCsl('csl-er-thr',Math.round((TOOLS.eraser.thresh||0)*100),v=>{TOOLS.eraser.thresh=v/100;eThresh=TOOLS.eraser.thresh;document.getElementById('v-er-thr').textContent=v+'%';drawEr();});
   document.getElementById('cb-er-pr').checked=TOOLS.eraser.pressure;
   document.getElementById('cb-er-pr').addEventListener('change',e=>{TOOLS.eraser.pressure=e.target.checked;ePressure=e.target.checked;document.getElementById('er-pr-sec').style.opacity=e.target.checked?'1':'0.4';drawEr();});
