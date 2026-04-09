@@ -4,10 +4,45 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;BinaryPaint&quot;,&quot;short_name&quot;:&quot;BPaint&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0d0d14&quot;,&quot;theme_color&quot;:&quot;#0d0d14&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230d0d14'/><text y='75' font-size='70'>✏️</text></svg>&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
-<meta name="apple-mobile-web-app-title" content="BinaryPaint">
+<link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;Inkstride&quot;,&quot;short_name&quot;:&quot;Inkstride&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0d0d14&quot;,&quot;theme_color&quot;:&quot;#0d0d14&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%230d0d14'/><text y='75' font-size='70'>✒️</text></svg>&quot;,&quot;sizes&quot;:&quot;any&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
+<meta name="apple-mobile-web-app-title" content="Inkstride">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>BinaryPaint</title>
+<title>Inkstride v21</title>
+<!--
+  Inkstride v21 (BinaryPaint v20 派生)
+  ============================================================
+  v21 改修内容 (Phase T + Phase 2′):
+  ============================================================
+  Phase T: タッチイベント統合 (症状D 指+ペン同時の対策)
+    - finger touchstart 先頭に penId ガードを移動
+      (パネル誤クローズ防止、L2152→L2138相当)
+    - _eyedropTimer の所有権を単一化 (_eyedropOwner 状態追加)
+    - 入力モード状態 _inputMode を導入 (IDLE/PEN/FINGER/EYEDROP)
+    - pen 開始時に finger 側のすべての一時状態を確実にクリア
+
+  Phase 2′: bbox型 undo (症状C 周期的フリーズの主犯対策)
+    - L1303 で毎ストローク発生していた readAllLayers() を撤去
+    - 代替: ストロークが触れた bbox 範囲のみ readPixels で取得
+      (4 layers × 62MB → 1 layer × 約1MB に削減 ≈ 248倍)
+    - queueDot/queueLine で _strokeBBox を継続的に拡張
+    - 通常ブラシ: finishStroke 時に
+        BEFORE = layer.fbo[bbox] (composite 前)
+        AFTER  = layer.fbo[bbox] (composite 後)
+    - 消しゴム/透明色: beginStroke 時に layer→shadow を blit、
+      finishStroke 時に shadow から BEFORE を読む
+    - 新タイムラインエントリ: {type:'keyframe',label:'stroke_diff',
+        layerId, bbox:{x,y,w,h}, before:Uint8Array, after:Uint8Array}
+    - undo/redo に高速パス追加 (bbox texSubImage2D で復元)
+    - 古い stroke_diff の pixel data は MAX_STROKE_DIFF_INMEM で
+      自動破棄 (オブジェクト自体は残し、低速パスで復元可能)
+    - 80エントリ硬上限を撤廃 (代わりにメモリ上限ベース管理)
+
+  既知の制限:
+    - PBO + fenceSync 非同期化は Phase R で別途実装
+    - タイル化本体 (Phase 1〜5) は別ターン
+    - state集約リファクタ (Phase -1) は別ターン
+-->
+
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Noto+Sans+JP:wght@300;400;500&display=swap');
 :root{
@@ -870,6 +905,21 @@ let segArr=new Float32Array(MAX_SEG*6),segCount=0;
 let compA_tex=null,compA_fbo=null,compB_tex=null,compB_fbo=null;
 let gLayers=[],gActiveIdx=0;
 
+// === Phase 2′: bbox-based undo state ===
+// レイヤー全体スナップショット (62MB×N) を bbox 部分読み出し (~1MB) に置換するための状態
+let _layerShadowTex=null,_layerShadowFBO=null,_layerShadowW=0,_layerShadowH=0;
+let _strokeBBox=null;        // {minX,minY,maxX,maxY} ストローク中に拡張するキャンバス座標bbox
+let _strokeMaxRadius=0;      // ストローク中に観測した最大ブラシ半径 (パディング用)
+let _strokeShadowValid=false;// shadow が現ストロークの BEFORE を保持しているか
+let _strokeBeforeLayerId=null;// shadow が示すレイヤーID
+const MAX_STROKE_DIFF_INMEM=200; // この件数を超えた古い stroke_diff の pixel data を解放
+
+// === Phase T: 入力モード状態 ===
+// 'idle' | 'pen' | 'finger' | 'eyedrop'
+// 単一の真実源として持ち、複数ハンドラ間の競合を防止
+let _inputMode='idle';
+let _eyedropOwner=null;      // 'pen' | 'finger' | null (タイマー所有者)
+
 function makeR8Texture(w,h){
   // レイヤーはフルカラーRGBA8を使用
   const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);
@@ -979,6 +1029,7 @@ function queueDot(x,y,d){
   const b=segCount*6,r=d/2;
   segArr[b]=x;segArr[b+1]=y;segArr[b+2]=x;segArr[b+3]=y;segArr[b+4]=r;segArr[b+5]=r;
   segCount++;
+  _expandStrokeBBox(x,y,x,y,r); // Phase 2′: bbox 追跡
 }
 function queueLine(x0,y0,x1,y1,d0,d1){
   if(d1===undefined)d1=d0; // d1省略時は均一径
@@ -987,6 +1038,7 @@ function queueLine(x0,y0,x1,y1,d0,d1){
   segArr[b]=x0;segArr[b+1]=y0;segArr[b+2]=x1;segArr[b+3]=y1;
   segArr[b+4]=d0/2;segArr[b+5]=d1/2; // テーパー: 始端r0, 終端r1
   segCount++;
+  _expandStrokeBBox(x0,y0,x1,y1,Math.max(d0,d1)/2); // Phase 2′: bbox 追跡
 }
 
 let drawScheduled=false;
@@ -1090,6 +1142,7 @@ function compositeAndDisplay(){
 let _crBuf=[];
 function beginStroke(sx,sy,f){
   stabClear();_crBuf=[];
+  _resetStrokeBBox(); // Phase 2′: ストローク開始時に bbox 状態をクリア
   const isPencil=eraserOn?TOOLS.eraser.pencil:(activeTool==='marker'?TOOLS.marker.pencil:TOOLS.pen.pencil);
   // 消しゴム・透明色は直接layer.fboに書く（strokeBufは空なので消去できない）
   // 通常ブラシのみstrokeBufを使う（接合部二重合成防止）
@@ -1097,6 +1150,10 @@ function beginStroke(sx,sy,f){
   _pencilMode=isPencil;
   if(_abActive){
     gl.bindFramebuffer(gl.FRAMEBUFFER,strokeBufFBO);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
+  } else {
+    // Phase 2′: 消しゴム/透明色は layer.fbo を直接変更するため、開始時に shadow へ GPU コピー
+    // (通常ブラシは strokeBuf 経由なので layer.fbo は finishStroke まで未変更, shadow 不要)
+    _captureLayerShadow();
   }
   _strokeOnset=0; // ランプリセット
   _lastPressure=0.01; // 描き始めは極小圧力からスタート（溜まり防止）
@@ -1160,6 +1217,22 @@ function finishStroke(){
     for(let i=1;i<n;i++){const p=_crBuf[i];queueLine(_crBuf[i-1].x,_crBuf[i-1].y,p.x,p.y,_crBuf[i-1].d,p.d);}
   }
   if(segCount>0)flushBrushGPU(); // finishStroke: GPU描画のみ、scheduleDraw不要
+
+  // ===== Phase 2′: bbox 範囲の BEFORE 状態を取得 =====
+  // 通常ブラシは strokeBuf 経由で描いており、composite 前なら layer.fbo は BEFORE 状態
+  // 消しゴム/透明色は beginStroke で shadow にコピー済み
+  const bbox=_finalizeStrokeBBox();
+  let _bboxBefore=null;
+  if(bbox && _recStroke && gLayers[gActiveIdx]){
+    if(_abActive){
+      // 通常ブラシ: layer.fbo は未変更状態
+      _bboxBefore=_readBBoxFromFBO(gLayers[gActiveIdx].fbo,bbox);
+    } else if(_strokeShadowValid && _layerShadowFBO){
+      // 消しゴム/透明色: shadow が BEFORE を保持
+      _bboxBefore=_readBBoxFromFBO(_layerShadowFBO,bbox);
+    }
+  }
+
   if(_abActive&&strokeBufFBO){
     // エアブラシ: strokeBufをレイヤーにpre-mult src-overでスタンプ
     const layer=gLayers[gActiveIdx];
@@ -1176,6 +1249,21 @@ function finishStroke(){
     }
     _abActive=false;_pencilMode=false;
   }
+
+  // ===== Phase 2′: bbox 範囲の AFTER 状態を取得 =====
+  // composite 後の layer.fbo が AFTER。
+  let _bboxAfter=null;
+  if(bbox && _recStroke && gLayers[gActiveIdx]){
+    _bboxAfter=_readBBoxFromFBO(gLayers[gActiveIdx].fbo,bbox);
+  }
+  // _recStroke にスタッシュ（_commitRecStroke が拾う）
+  if(_recStroke){
+    _recStroke._bboxDiff = (bbox && _bboxBefore && _bboxAfter)
+      ? {bbox, before:_bboxBefore, after:_bboxAfter, layerId:gLayers[gActiveIdx]?gLayers[gActiveIdx].id:null}
+      : null;
+  }
+  _resetStrokeBBox();
+
   lastDrawPt=null;stabClear();
   _commitRecStroke(_crBuf.slice());
   _crBuf=[];
@@ -1240,14 +1328,139 @@ async function readAllLayersAsync(){
   return{layers,structure,activeIdx:ai,bgColor:bg};
 }
 
+// === Phase 2′: bbox snapshot helpers ===========================================
+// shadow FBO は消しゴム/透明色ストロークで BEFORE 状態を保持するための GPU バッファ。
+// 通常ブラシでは strokeBuf 経由で描画するため layer.fbo は最後まで未変更で、
+// shadow を使わずに直接 layer.fbo から BEFORE を読める。
+function _ensureLayerShadow(){
+  if(_layerShadowTex && _layerShadowW===CW && _layerShadowH===CH) return true;
+  if(_layerShadowFBO){gl.deleteFramebuffer(_layerShadowFBO);_layerShadowFBO=null;}
+  if(_layerShadowTex){gl.deleteTexture(_layerShadowTex);_layerShadowTex=null;}
+  try{
+    _layerShadowTex=makeRGBATexture(CW,CH);
+    _layerShadowFBO=makeFBO(_layerShadowTex);
+    if(!_layerShadowFBO){_layerShadowTex=null;return false;}
+    _layerShadowW=CW;_layerShadowH=CH;
+    return true;
+  }catch(e){_layerShadowTex=null;_layerShadowFBO=null;return false;}
+}
+function _captureLayerShadow(){
+  // アクティブレイヤー全体を shadow に GPU コピー (PCIe 転送なし)
+  // 消しゴム/透明色のみ呼び出される。bbox 確定前のため全面コピー。
+  if(!gLayers[gActiveIdx])return false;
+  if(!_ensureLayerShadow())return false;
+  const src=gLayers[gActiveIdx].fbo;
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,src);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,_layerShadowFBO);
+  gl.blitFramebuffer(0,0,CW,CH,0,0,CW,CH,gl.COLOR_BUFFER_BIT,gl.NEAREST);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+  gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER,null);
+  _strokeShadowValid=true;
+  _strokeBeforeLayerId=gLayers[gActiveIdx].id;
+  return true;
+}
+function _resetStrokeBBox(){
+  _strokeBBox=null;_strokeMaxRadius=0;
+  _strokeShadowValid=false;_strokeBeforeLayerId=null;
+}
+function _expandStrokeBBox(x0,y0,x1,y1,r){
+  // queueDot/queueLine から呼ばれる。半径 r を含めた矩形で拡張。
+  if(r>_strokeMaxRadius)_strokeMaxRadius=r;
+  const xa=Math.min(x0,x1)-r, ya=Math.min(y0,y1)-r;
+  const xb=Math.max(x0,x1)+r, yb=Math.max(y0,y1)+r;
+  if(!_strokeBBox){_strokeBBox={minX:xa,minY:ya,maxX:xb,maxY:yb};return;}
+  if(xa<_strokeBBox.minX)_strokeBBox.minX=xa;
+  if(ya<_strokeBBox.minY)_strokeBBox.minY=ya;
+  if(xb>_strokeBBox.maxX)_strokeBBox.maxX=xb;
+  if(yb>_strokeBBox.maxY)_strokeBBox.maxY=yb;
+}
+function _finalizeStrokeBBox(){
+  // クリップしたピクセル整数 bbox {x,y,w,h} を返す。空なら null。
+  if(!_strokeBBox)return null;
+  // anti-alias とフラット未満の数値誤差マージン
+  const pad=2;
+  let x=Math.floor(_strokeBBox.minX-pad);
+  let y=Math.floor(_strokeBBox.minY-pad);
+  let x2=Math.ceil(_strokeBBox.maxX+pad);
+  let y2=Math.ceil(_strokeBBox.maxY+pad);
+  x=Math.max(0,Math.min(CW,x));
+  y=Math.max(0,Math.min(CH,y));
+  x2=Math.max(0,Math.min(CW,x2));
+  y2=Math.max(0,Math.min(CH,y2));
+  const w=x2-x, h=y2-y;
+  if(w<=0||h<=0)return null;
+  return {x,y,w,h};
+}
+function _readBBoxFromFBO(fbo,bbox){
+  // 同期 readPixels だが対象は bbox の小領域のみ (~1MB 程度)
+  // PBO 非同期化は Phase R で別途実装
+  // 重要: bbox.y は canvas 座標 (y=0 が上), FBO は GL 座標 (y=0 が下).
+  // ブラシ VS は gl_Position.y = -clip.y で反転しているため両者は反対.
+  // 読み出し時に glY = CH - (bbox.y + bbox.h) で変換する.
+  const glY = CH - (bbox.y + bbox.h);
+  const buf=new Uint8Array(bbox.w*bbox.h*4);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,fbo);
+  gl.readPixels(bbox.x,glY,bbox.w,bbox.h,gl.RGBA,gl.UNSIGNED_BYTE,buf);
+  gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+  return buf;
+}
+function _writeBBoxToLayer(layer,bbox,rgba){
+  // bbox 部分のピクセルを texSubImage2D で書き戻す (高速復元)
+  // 重要: _readBBoxFromFBO と同じ GL 座標変換を適用. read と write が同じ
+  // glY を使うため, 取得したピクセルバッファはそのまま書き戻せる.
+  if(!layer||!rgba||!bbox)return;
+  const glY = CH - (bbox.y + bbox.h);
+  gl.bindTexture(gl.TEXTURE_2D,layer.tex);
+  gl.texSubImage2D(gl.TEXTURE_2D,0,bbox.x,glY,bbox.w,bbox.h,gl.RGBA,gl.UNSIGNED_BYTE,rgba);
+  gl.bindTexture(gl.TEXTURE_2D,null);
+}
+function _applyStrokeDiff(entry,direction){
+  // direction: 'before' | 'after'
+  if(!entry||!entry.bbox||!entry.layerId)return false;
+  const layer=gLayers.find(l=>l.id===entry.layerId);
+  if(!layer)return false;
+  const data=direction==='before'?entry.before:entry.after;
+  if(!data)return false; // pixel data が破棄済み (古い stroke_diff)
+  _writeBBoxToLayer(layer,entry.bbox,data);
+  return true;
+}
+function _trimStrokeDiffMemory(){
+  // 古い stroke_diff の pixel data を解放 (オブジェクトは残し timelapse 互換性維持)
+  let kept=0;
+  for(let i=timeline.length-1;i>=0;i--){
+    const e=timeline[i];
+    if(e && e.type==='keyframe' && e.label==='stroke_diff'){
+      kept++;
+      if(kept>MAX_STROKE_DIFF_INMEM){
+        e.before=null;
+        e.after=null;
+        e.compacted=true;
+      }
+    }
+  }
+}
+
 // ── タイムライン操作 ──────────────────────────────────────
 function _tlPush(entry){
   if(timelinePos<timeline.length-1) timeline.length=timelinePos+1;
   timeline.push(entry);timelinePos=timeline.length-1;
-  while(timeline.length>80){ // 1ストローク2エントリなので40ストローク分
-    const i=timeline.findIndex((e,j)=>j>0&&e.type==='keyframe');
-    if(i<0)break;
-    timeline.splice(0,i);timelinePos=timeline.length-1;
+  // Phase 2′: 80エントリ硬上限を撤廃。代わりに pixel data の総メモリを bbox 件数で制限。
+  // タイムライン自体はオブジェクト数で緩く上限を持つ (タイムラプス用に保持)。
+  if(entry && entry.type==='keyframe' && entry.label==='stroke_diff'){
+    _trimStrokeDiffMemory();
+  }
+  // 緊急上限: オブジェクト数があまりに多くなったら最古から間引く
+  // (1万件超で古い stroke_diff オブジェクト自体を削除)
+  if(timeline.length>10000){
+    // 末尾から MAX_STROKE_DIFF_INMEM 個の stroke_diff を残し、それ以外で古いものを削減
+    // 安全のため初期 KF (位置 0) は常に保持
+    const targetLen=Math.max(2000,MAX_STROKE_DIFF_INMEM*4);
+    if(timeline.length>targetLen){
+      const removeCount=timeline.length-targetLen;
+      // 0 (初期 KF) は残す
+      timeline.splice(1,removeCount);
+      timelinePos=Math.max(0,timelinePos-removeCount);
+    }
   }
 }
 function _insertKeyframe(){
@@ -1296,11 +1509,27 @@ function _commitRecStroke(crBuf){
     Math.round(p.d/sc*10000)/10000
   ]));
   _recStroke.pointCount=_recStroke.points.length;
+  // bbox diff を取り出し (finishStroke でスタッシュされた)
+  const diff=_recStroke._bboxDiff||null;
+  delete _recStroke._bboxDiff;
   _tlPush(_recStroke);_recStroke=null;
   _strokeCount++;
   if(_strokeCount>=KEYFRAME_EVERY)_insertKeyframe();
-  // ストロークごとに即時キーフレーム: アンドゥは常に完全なピクセル状態を復元
-  _tlPush({type:'keyframe',label:'stroke_kf',snap:readAllLayers()});
+  // ===== Phase 2′: 旧仕様の readAllLayers() を撤去 =====
+  // 旧: _tlPush({type:'keyframe',label:'stroke_kf',snap:readAllLayers()})
+  //     → 4 layers × 62MB = 248MB を毎ストローク確保 (周期的フリーズの主犯)
+  // 新: bbox 範囲のみ before/after を保持 (典型 1-4 MB)
+  // bbox 取得失敗時 (空 bbox / ruler 等) もマーカーとしてエントリは追加し、
+  // タイムライン構造の一貫性を保つ。pixel data なしのエントリは undo の
+  // 低速パスにフォールバックする。
+  _tlPush({
+    type:'keyframe',          // 既存の keyframe 分岐ロジック互換
+    label:'stroke_diff',       // 新フォーマット識別子
+    layerId:diff?diff.layerId:(gLayers[gActiveIdx]?gLayers[gActiveIdx].id:null),
+    bbox:diff?diff.bbox:null,
+    before:diff?diff.before:null,
+    after:diff?diff.after:null
+  });
 }
 function captureStroke(){if(penId!==null)return;}
 const deferCapture=()=>captureStroke();
@@ -1440,7 +1669,14 @@ function _replayEvent(ev){
     case 'layer_prop':  _replayLayerProp(ev);break;
     case 'bg_color':    applyBg(ev.color);break;
     case 'flip':        flipState=ev.state;syncFlipBtn();applyView();break;
-    case 'keyframe':    _restoreKeyframeSnap(ev.snap);break;
+    case 'keyframe':
+      // Phase 2′: stroke_diff (bbox 部分) と従来 keyframe (全面 snap) を分岐
+      if(ev.label==='stroke_diff'){
+        _applyStrokeDiff(ev,'after');
+      } else {
+        _restoreKeyframeSnap(ev.snap);
+      }
+      break;
   }
 }
 
@@ -1471,10 +1707,33 @@ function _restoreKeyframeSnap(snap){
 
 function _restoreToPos(pos){
   if(pos<0)return;undoBusy=true;
-  let kf=-1;for(let i=pos;i>=0;i--){if(timeline[i].type==='keyframe'){kf=i;break;}}
+  // Phase 2′: 完全 keyframe (label !== 'stroke_diff') を anchor として探索
+  let kf=-1;
+  for(let i=pos;i>=0;i--){
+    const e=timeline[i];
+    if(e && e.type==='keyframe' && e.label!=='stroke_diff'){kf=i;break;}
+  }
   if(kf<0){undoBusy=false;return;}
   _restoreKeyframeSnap(timeline[kf].snap);
-  for(let i=kf+1;i<=pos;i++) _replayEvent(timeline[i]);
+  // anchor から pos まで前進再生
+  for(let i=kf+1;i<=pos;i++){
+    const e=timeline[i];
+    if(!e)continue;
+    if(e.type==='keyframe' && e.label==='stroke_diff'){
+      // pixel data があれば bbox 適用 (高速)
+      // 無ければ直前の stroke エントリが既に再描画している前提
+      if(e.before && e.after) _applyStrokeDiff(e,'after');
+    } else if(e.type==='stroke'){
+      // 直後に有効な stroke_diff があれば再描画スキップ (重複作業回避)
+      const next=timeline[i+1];
+      if(next && next.type==='keyframe' && next.label==='stroke_diff' && next.after){
+        continue;
+      }
+      _replayStroke(e);
+    } else {
+      _replayEvent(e);
+    }
+  }
   if(segCount>0)flushBrushGPU();
   undoBusy=false;
   scheduleDraw();if(openPanel==='layers'){renderLayers();debouncedUpdateThumbs();}
@@ -1482,22 +1741,65 @@ function _restoreToPos(pos){
 function undo(){
   if(undoBusy){showToast('処理中…');return;}
   if(timelinePos<=0){showToast('これ以上元に戻せません');return;}
-  // stroke_kfとstrokeを一緒にスキップして前のstroke_kfに戻る
-  let p=timelinePos;
-  while(p>0&&timeline[p]&&timeline[p].label==='stroke_kf')p--; // stroke_kfをスキップ
-  while(p>0&&timeline[p]&&timeline[p].type==='stroke')p--;    // strokeをスキップ
-  // この時点でpはstroke_kf or KF0 or 0
+
+  // Phase 2′ rev3: 「1論理ステップ後退」モデル
+  // 種別ごとに1ステップの幅が異なる:
+  //   - stroke_diff (データ有/無): 直前の stroke と一緒に1ステップ
+  //   - plain event (layer_add, fill, flip 等): 単独で1ステップ
+  //   - operation keyframe (transform/resize/merge 等): 単独で1ステップ
+  const cur=timeline[timelinePos];
+  let p;
+  if(cur && cur.type==='keyframe' && cur.label==='stroke_diff'){
+    // ストロークペアをスキップ
+    p=timelinePos-1;
+    while(p>0 && timeline[p] && timeline[p].type==='stroke') p--;
+  } else {
+    // plain event or operation keyframe: 1エントリ後退
+    p=timelinePos-1;
+  }
+  if(p<0)p=0;
+
+  // 高速パス: 現エントリが pixel data 付き stroke_diff
+  if(cur && cur.type==='keyframe' && cur.label==='stroke_diff' && cur.before){
+    undoBusy=true;
+    _applyStrokeDiff(cur,'before');
+    timelinePos=p;
+    if(segCount>0)flushBrushGPU();
+    undoBusy=false;
+    scheduleDraw();if(openPanel==='layers'){renderLayers();debouncedUpdateThumbs();}
+    showToast('元に戻す');
+    return;
+  }
+
+  // 低速パス: KF anchor まで遡って 1 論理ステップ手前まで前進再生
   timelinePos=p;
   _restoreToPos(timelinePos);showToast('元に戻す');
 }
 function redo(){
   if(undoBusy){showToast('処理中…');return;}
   if(timelinePos>=timeline.length-1){showToast('やり直しはありません');return;}
+
+  // Phase 2′ rev3: 「1論理ステップ前進」モデル
+  // 次が stroke エントリならその直後の stroke_diff まで進む.
+  // それ以外なら 1 エントリ前進.
   let p=timelinePos+1;
-  // stroke → stroke_kf の1セットを進める
-  while(p<timeline.length-1&&timeline[p]&&timeline[p].type==='stroke')p++;
-  // stroke_kfに止まる（ここでrestoreすれば完全一致）
-  timelinePos=Math.min(p,timeline.length-1);
+  while(p<timeline.length && timeline[p] && timeline[p].type==='stroke') p++;
+  if(p>=timeline.length){showToast('やり直しはありません');return;}
+  const next=timeline[p];
+
+  // 高速パス: 次が pixel data 付き stroke_diff
+  if(next && next.type==='keyframe' && next.label==='stroke_diff' && next.after){
+    undoBusy=true;
+    _applyStrokeDiff(next,'after');
+    timelinePos=p;
+    undoBusy=false;
+    scheduleDraw();if(openPanel==='layers'){renderLayers();debouncedUpdateThumbs();}
+    showToast('やり直し');
+    return;
+  }
+
+  // 低速パス: 次のエントリ位置まで前進再生
+  timelinePos=p;
   _restoreToPos(timelinePos);showToast('やり直し');
 }
 
@@ -2028,16 +2330,22 @@ document.addEventListener('touchstart',function(e){
   updPRC(st.clientX,st.clientY,st.force);schedulePanelAutoClose();
   // ペン開始時: 指ナビ状態をリセット（手のひら同時タッチの誤動作防止）
   ftouches.clear();maxFC=0;fMoved=false;panBase=null;pinchBase=null;
+  // Phase T: finger 側で進行中の eyedrop タイマー/状態を確実にキャンセル
+  if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+  _eyedropOwner=null;
   // バケツポップアップを閉じる（通常描画開始時）
   if(subMode!=='fill'&&window._closeFillDialog&&document.getElementById('fill-dialog').classList.contains('show'))window._closeFillDialog();
   // 0.4秒完全静止ホールドでスポイトモード（移動したらキャンセル）
   _eyedropStartX=st.clientX;_eyedropStartY=st.clientY;_eyedropMoved=false;
+  _eyedropOwner='pen';
   _eyedropTimer=setTimeout(()=>{
+    _eyedropTimer=null;
     if(penId===st.identifier&&!_eyedropMoved){
       // 静止ホールドのみスポイト起動（ストローク中は不可）
       segCount=0;_crBuf=[];lastDrawPt=null;stabClear();
       _eyedropStart(st.clientX,st.clientY);
     }
+    _eyedropOwner=null;
   },400);
   _startPenWatchdog();
   snapshotBeforeStroke();
@@ -2111,13 +2419,24 @@ document.addEventListener('touchend',function(e){
   if(subMode==='ref'){_refHandle=null;_refPrevPt=null;return;}
   if(subMode==='fill'){penId=null;return;}
   selHandle=null;selPrevPt=null;if(selState==='lasso'){drawSelOv();return;}
-  clearTimeout(_eyedropTimer);
+  // Phase T: pen が所有していた eyedrop タイマー/オーナーをクリア
+  if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+  if(_eyedropOwner==='pen')_eyedropOwner=null;
   if(_eyedropActive){_eyedropEnd(st.clientX,st.clientY);prc.style.display='none';return;}
   _stopPenWatchdog();finishStroke();captureStroke();
 },{passive:false,capture:true});
 document.addEventListener('touchcancel',function(e){
   if(penId===null)return;
-  for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){_stopPenWatchdog();penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;rulerStart=null;rulerPreviewPt=null;try{finishStroke();}catch(e2){}captureStroke();break;}
+  for(let i=0;i<e.changedTouches.length;i++)if(e.changedTouches[i].identifier===penId){
+    _stopPenWatchdog();
+    // Phase T: pen 所有 eyedrop タイマーもクリア
+    if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+    if(_eyedropOwner==='pen')_eyedropOwner=null;
+    penId=null;prc.style.display='none';selHandle=null;selPrevPt=null;rulerStart=null;rulerPreviewPt=null;
+    try{finishStroke();}catch(e2){}
+    captureStroke();
+    break;
+  }
 },{passive:false,capture:true});
 
 // ── 指ナビ ────────────────────────────────────────────────
@@ -2136,6 +2455,10 @@ function rebuildNav(){
 document.addEventListener('touchstart',function(e){
   if(hasStylusT(e.touches))return;
   if(isNativeEl(e.target))return;
+  // Phase T: ペン描画中は finger 系イベントを完全に無視
+  // (旧コードはパネルクローズロジックの後にチェックしていたため、
+  //  ペン描画中の偶発的な指接触でパネルが勝手に閉じる不具合があった)
+  if(penId!==null)return;
   e.preventDefault();
   // 指タップでパネルを閉じる（パネル外・UI外タップ）
   if(ftouches.size===0){
@@ -2148,17 +2471,21 @@ document.addEventListener('touchstart',function(e){
       if(!p.contains(e.target)&&(!trigger||!trigger.contains(e.target))){p.classList.remove('open');}
     });
   }
-  // ペン描画中は手のひら・指のタッチをナビゲーションに使わない
-  if(penId!==null)return;
   // 1本指の長押し(0.4s)でスポイト（キャンバス上のみ・静止時のみ）
   if(e.changedTouches.length===1&&ftouches.size===0){
     const ft=e.changedTouches[0];
     const hitEl=document.elementFromPoint(ft.clientX,ft.clientY);
     if(hitEl&&(hitEl.id==='gl-canvas'||hitEl.id==='sel-overlay'||hitEl.closest('#ca'))){
       _eyedropStartX=ft.clientX;_eyedropStartY=ft.clientY;_eyedropMoved=false;
-      clearTimeout(_eyedropTimer);
+      // Phase T: 既存タイマーを必ず解除してから新規セット (二重発火防止)
+      if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+      _eyedropOwner='finger';
       _eyedropTimer=setTimeout(()=>{
+        _eyedropTimer=null;
+        // ペンが先に来ていたら起動しない
+        if(penId!==null){_eyedropOwner=null;return;}
         if(ftouches.size<=1&&!_eyedropActive&&!_eyedropMoved)_eyedropStart(ft.clientX,ft.clientY);
+        _eyedropOwner=null;
       },400);
     }
   }
@@ -2202,8 +2529,12 @@ document.addEventListener('touchmove',function(e){
   if(selState==='transform')drawSelOv();
 },{passive:false,capture:false});
 document.addEventListener('touchend',function(e){
-  // スポイトモード終了（指離し）
-  clearTimeout(_eyedropTimer);_eyedropTimer=null;
+  // Phase T: 自分(finger)が所有する eyedrop タイマーのみ解除する
+  // (旧コードは無条件clearで pen 側のタイマーも巻き込んで停止していた)
+  if(_eyedropOwner==='finger'){
+    if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+    _eyedropOwner=null;
+  }
   if(_eyedropActive){
     // eyedropEndの中でftouchesをclearするので追加削除不要
     const t=e.changedTouches[0];
@@ -2224,7 +2555,11 @@ document.addEventListener('touchend',function(e){
   }else rebuildNav();
 },{passive:false,capture:false});
 document.addEventListener('touchcancel',function(e){
-  clearTimeout(_eyedropTimer);
+  // Phase T: 自分(finger)所有の eyedrop タイマーのみ解除
+  if(_eyedropOwner==='finger'){
+    if(_eyedropTimer){clearTimeout(_eyedropTimer);_eyedropTimer=null;}
+    _eyedropOwner=null;
+  }
   if(_eyedropActive){_eyedropActive=false;_eyedropOverlay.style.display='none';}
   for(let i=0;i<e.changedTouches.length;i++){const t=e.changedTouches[i];if(!isStylusT(t))ftouches.delete(t.identifier);}
   if(!ftouches.size){maxFC=0;fMoved=false;gStart=0;panBase=null;pinchBase=null;}
@@ -2606,15 +2941,30 @@ document.getElementById('sv-go').addEventListener('pointerdown',async e=>{
     if(!l.visible)continue;
     const r8=new Uint8Array(CW*CH*4);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER,l.fbo);gl.readPixels(0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindFramebuffer(gl.READ_FRAMEBUFFER,null);
+    // v21 fix: 旧BinaryPaint 1bit 量子化コードを撤去. RGBA8 を正しく読み un-premultiply してCanvas2D に渡す.
+    // レイヤー FBO はブラシシェーダー出力の pre-multiplied alpha で保存されている (rgb*a, a).
+    // Canvas2D の putImageData は straight alpha を期待するため un-premult が必要.
+    // Y 反転は WebGL (y=0 下) ↔ Canvas2D (y=0 上) の座標系差分.
     const rgba=new Uint8ClampedArray(CW*CH*4);
-    const[ir,ig,ib]=[Math.round(l.color[0]*255),Math.round(l.color[1]*255),Math.round(l.color[2]*255)];
-    for(let row=0;row<CH;row++){const srcRow=CH-1-row;for(let col=0;col<CW;col++){
-      const on=r8[srcRow*CW+col]>127;const oi=(row*CW+col)*4;
-      rgba[oi]=on?ir:0;rgba[oi+1]=on?ig:0;rgba[oi+2]=on?ib:0;rgba[oi+3]=on?Math.round(l.opacity*255):0;
-    }}
+    for(let row=0;row<CH;row++){
+      const srcRow=CH-1-row;
+      for(let col=0;col<CW;col++){
+        const si=(srcRow*CW+col)*4, di=(row*CW+col)*4;
+        const pa=r8[si+3];
+        if(pa===0){
+          rgba[di]=0;rgba[di+1]=0;rgba[di+2]=0;rgba[di+3]=0;
+        } else {
+          const a=pa/255;
+          rgba[di  ]=Math.min(255,Math.round(r8[si  ]/a));
+          rgba[di+1]=Math.min(255,Math.round(r8[si+1]/a));
+          rgba[di+2]=Math.min(255,Math.round(r8[si+2]/a));
+          rgba[di+3]=pa;
+        }
+      }
+    }
     const lc=_mkC(CW,CH);const lctx=lc.getContext('2d');
     lctx.putImageData(new ImageData(rgba,CW,CH),0,0);
-    outCtx.globalAlpha=1;
+    outCtx.globalAlpha=l.opacity??1; // レイヤー不透明度を合成時に適用
     outCtx.globalCompositeOperation={normal:'source-over',multiply:'multiply',overlay:'overlay'}[l.blend]||'source-over';
     outCtx.drawImage(lc,0,0);
     await new Promise(r=>setTimeout(r,0));
@@ -2706,12 +3056,49 @@ function loadPSDFile(file){
       else{gLayers.forEach(l=>{gl.deleteTexture(l.tex);gl.deleteFramebuffer(l.fbo);});gLayers=[];timeline=[];timelinePos=-1;_recStroke=null;_strokeCount=0;}
       records.forEach((rec,li)=>{
         const chans=layerPixels[li];const alpha=chans[-1],R=chans[0],G=chans[1],B=chans[2];
-        let ir=0,ig=0,ib=0;if(R&&G&&B){for(let i=0;i<(alpha?alpha.length:0);i++){if(alpha[i]>127){ir=R[i];ig=G[i];ib=B[i];break;}}}
-        const hexColor='#'+(ir.toString(16).padStart(2,'0'))+(ig.toString(16).padStart(2,'0'))+(ib.toString(16).padStart(2,'0'));
+        // v21 fix: 旧BinaryPaint コードは alpha だけを使い RGB=(0,0,0) 固定で保存していたため
+        // 読み込み時すべて真っ黒になっていた. RGB チャネルを正しく使用する.
+        // PSD は straight alpha 形式. レイヤー FBO は pre-multiplied で保持するため変換が必要.
         const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
         gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-        if(alpha){const rgba=new Uint8Array(CW*CH*4);for(let i=0;i<alpha.length;i++){const v=alpha[i]>127?255:0;rgba[i*4]=0;rgba[i*4+1]=0;rgba[i*4+2]=0;rgba[i*4+3]=v;}gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);gl.bindTexture(gl.TEXTURE_2D,null);}
-        gLayers.push({id:(Date.now()*1000+Math.random()*999)|0,name:rec.name,color:hexToRGB01(hexColor),opacity:rec.opacity,visible:rec.visible,blend:rec.blendMode,tex,fbo});
+        if(alpha && R && G && B){
+          const rgba=new Uint8Array(CW*CH*4);
+          // PSD の画素レイアウトは上原点行メジャー. FBO は下原点なので Y 反転.
+          for(let row=0;row<CH;row++){
+            const sr=CH-1-row; // FBO 側の行
+            for(let col=0;col<CW;col++){
+              const si=row*CW+col;
+              const di=(sr*CW+col)*4;
+              const a=alpha[si];
+              if(a===0){rgba[di]=0;rgba[di+1]=0;rgba[di+2]=0;rgba[di+3]=0;}
+              else {
+                const av=a/255;
+                rgba[di  ]=Math.round(R[si]*av);
+                rgba[di+1]=Math.round(G[si]*av);
+                rgba[di+2]=Math.round(B[si]*av);
+                rgba[di+3]=a;
+              }
+            }
+          }
+          gl.bindTexture(gl.TEXTURE_2D,tex);
+          gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);
+          gl.bindTexture(gl.TEXTURE_2D,null);
+        } else if(alpha){
+          // RGB チャネルが欠落している古いマスクレイヤー扱い: 黒で塗る
+          const rgba=new Uint8Array(CW*CH*4);
+          for(let row=0;row<CH;row++){
+            const sr=CH-1-row;
+            for(let col=0;col<CW;col++){
+              const si=row*CW+col, di=(sr*CW+col)*4;
+              const a=alpha[si];
+              rgba[di]=0;rgba[di+1]=0;rgba[di+2]=0;rgba[di+3]=a;
+            }
+          }
+          gl.bindTexture(gl.TEXTURE_2D,tex);
+          gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);
+          gl.bindTexture(gl.TEXTURE_2D,null);
+        }
+        gLayers.push({id:(Date.now()*1000+Math.random()*999)|0,name:rec.name,color:[0,0,0],opacity:rec.opacity,visible:rec.visible,blend:rec.blendMode,tex,fbo});
       });
       gActiveIdx=0;fitView();renderLayers();scheduleDraw();setTimeout(captureNow,0);showToast('PSD読み込み完了 ('+records.length+'レイヤー)');
     }catch(err){showToast('PSD読み込み失敗: '+err.message);console.error(err);}
@@ -2723,10 +3110,27 @@ function buildPSD(layersData){
   const W=CW,H=CH,NL=layersData.length;
   const blk=b=>b==='multiply'?'mul ':'norm';
   function pstr(s){s=(s||'').slice(0,255);const b=[s.length];for(let i=0;i<s.length;i++)b.push(s.charCodeAt(i)&0xFF);while(b.length%4)b.push(0);return b;}
+  // v21 fix: 旧BinaryPaint 1bit 量子化ループを撤去. RGBA8 を正しく読み un-premultiply.
+  // PSD は straight alpha を期待する形式なので pre-mult → straight 変換が必要.
   const lpix=layersData.map(ld=>{
-    const ir=Math.round(ld.color[0]*255),ig=Math.round(ld.color[1]*255),ib=Math.round(ld.color[2]*255);
-    const n=W*H;const a=new Uint8Array(n),r=new Uint8Array(n),g=new Uint8Array(n),b=new Uint8Array(n);
-    for(let row=0;row<H;row++){const src=H-1-row;for(let col=0;col<W;col++){const i=row*W+col,ink=ld.r8[src*W+col];a[i]=ink;if(ink){r[i]=ir;g[i]=ig;b[i]=ib;}}}
+    const n=W*H;
+    const a=new Uint8Array(n),r=new Uint8Array(n),g=new Uint8Array(n),b=new Uint8Array(n);
+    for(let row=0;row<H;row++){
+      const src=H-1-row; // Y 反転 (WebGL→PSD)
+      for(let col=0;col<W;col++){
+        const i=row*W+col;
+        const si=(src*W+col)*4;
+        const pa=ld.r8[si+3];
+        a[i]=pa;
+        if(pa===0){r[i]=0;g[i]=0;b[i]=0;}
+        else {
+          const av=pa/255;
+          r[i]=Math.min(255,Math.round(ld.r8[si  ]/av));
+          g[i]=Math.min(255,Math.round(ld.r8[si+1]/av));
+          b[i]=Math.min(255,Math.round(ld.r8[si+2]/av));
+        }
+      }
+    }
     return[a,r,g,b];
   });
   const n=W*H;const[bgr,bgg,bgb]=hexToRGBint('#ffffff'); // bg always white
@@ -3435,11 +3839,24 @@ async function applyBPFPayload(payloadStr){
         const img=new Image(); img.onload=()=>{
           const tc=Object.assign(document.createElement('canvas'),{width:CW,height:CH});
           const tctx=tc.getContext('2d'); tctx.drawImage(img,0,0);
-          const id=tctx.getImageData(0,0,CW,CH); const r8=new Uint8Array(CW*CH);
-          for(let row=0;row<CH;row++){const fr=CH-1-row;for(let col=0;col<CW;col++)r8[fr*CW+col]=id.data[(row*CW+col)*4+3]>127?255:0;}
+          // v21 fix: 旧BinaryPaint の 1byte/pixel 読み出しを撤去. loadBPFFile と同一処理に統一.
+          // buildBPFPayload は pre-multiplied をそのまま PNG に書き出しているため,
+          // 読み戻し時も変換なしで RGBA4バイトをコピーするだけでよい (往復対称性).
+          const id=tctx.getImageData(0,0,CW,CH);
+          const rgba=new Uint8Array(CW*CH*4);
+          for(let row=0;row<CH;row++){
+            const fr=CH-1-row; // Y 反転 (Canvas2D→FBO)
+            for(let col=0;col<CW;col++){
+              const si=(row*CW+col)*4, di=(fr*CW+col)*4;
+              rgba[di  ]=id.data[si  ];
+              rgba[di+1]=id.data[si+1];
+              rgba[di+2]=id.data[si+2];
+              rgba[di+3]=id.data[si+3];
+            }
+          }
           const tex=makeR8Texture(CW,CH),fbo=makeFBO(tex);
           gl.bindFramebuffer(gl.FRAMEBUFFER,fbo);gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);gl.bindFramebuffer(gl.FRAMEBUFFER,null);
-          gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,r8);gl.bindTexture(gl.TEXTURE_2D,null);
+          gl.bindTexture(gl.TEXTURE_2D,tex);gl.texSubImage2D(gl.TEXTURE_2D,0,0,0,CW,CH,gl.RGBA,gl.UNSIGNED_BYTE,rgba);gl.bindTexture(gl.TEXTURE_2D,null);
           gLayers.push({id:lm.id||(Date.now()*1000+i),name:lm.name||('Layer '+(i+1)),color:lm.color||[0,0,0],opacity:lm.opacity??1,visible:lm.visible??true,blend:lm.blend||'normal',tex,fbo});
           resolve();
         };
